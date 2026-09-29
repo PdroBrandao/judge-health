@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Judge Health
 
-## Getting Started
+**Continuous validation of model-based evaluators** — Milestone 1 demo
 
-First, run the development server:
+> The problem: 90% overall agreement hides 50% agreement on the minority/high-stakes class.
+> The solution: class-aware reliability profiles, not headline metrics.
+
+---
+
+## What this is
+
+Judge Health is an open implementation of a continuous validation protocol for model-based evaluators (LLM-as-judge systems). It operationalises the core insight of **Judge Health Methodology v0.1**:
+
+- Automated evaluation creates a baseline, not a validated ground truth
+- A **representative human reference sample** establishes population-level estimates
+- **Targeted/risk reviews** are analytically separate from representative samples and must never be used for population-level metrics
+- **Class-aware reliability profiles** (confusion matrix + per-class recall with Wilson CIs) surface what overall agreement hides
+- **Metric and change triggers** are configured per deployment context — there are no universal thresholds
+- **A trigger is evidence to investigate, not evidence that the evaluator is wrong**
+
+---
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS |
+| Validation | Zod |
+| Charts | Recharts |
+| Tests | Vitest |
+
+---
+
+## Milestone 1 — Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
+npm test           # 54 tests, all passing
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Repository structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+src/
+  core/
+    types.ts           # All domain types
+    schemas.ts         # Zod validators
+    metrics/           # Wilson CI, confusion matrix, reliability profile
+    sampling/          # Representative vs targeted_risk separation
+    triggers/          # Metric and change trigger evaluation
+  data/
+    fixtures/          # Deterministic scenario (no live LLM)
+    fixture-repository.ts   # Validated data access layer
+  app/
+    page.tsx           # Overview (Milestone 1)
+  components/
+    reliability-profile.tsx
+    confusion-matrix.tsx
+    trigger-card.tsx
+    version-badge.tsx
+tests/
+  metrics.test.ts
+  sampling.test.ts
+  triggers.test.ts
+  lifecycle.test.ts   # end-to-end integration
+```
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Fixture scenario
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The demo scenario illustrates the core problem:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Metric | Baseline (v0.2.0) | Candidate (v0.3.0) |
+|---|---|---|
+| Overall agreement | 90.0% | 96.7% |
+| PASS recall | 94.4% | 98.1% |
+| **FAIL recall** | **50.0% ← gap** | **83.3%** |
+| Sample n | 60 representative | 60 representative |
 
-## Deploy on Vercel
+All values are derived from deterministic TypeScript fixtures. No LLM API is called.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Methodology
+
+See [METHODOLOGY.md](./METHODOLOGY.md) for the full v0.1 specification.
+
+## Known limitations
+
+See [LIMITATIONS.md](./LIMITATIONS.md) for documented failure modes.
+
+---
+
+*Part of the AACI (AI Agent Continuous Improvement) framework — Pedro Brandão, 2026.*
