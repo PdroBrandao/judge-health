@@ -1,26 +1,106 @@
 @import "tailwindcss";
 
+/* ── Judge Health instrument palette ───────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --jh-bg:         #f4f3ee;
+  --jh-panel:      #ffffff;
+  --jh-border:     #1c1c1a;
+  --jh-border-mid: #8a8880;
+  --jh-border-lt:  #d4d1c8;
+  --jh-text:       #111111;
+  --jh-dim:        #6a6960;
+  --jh-green:      #166534;
+  --jh-amber:      #92400e;
+  --jh-red:        #991b1b;
+  --jh-led-green:  #16a34a;
+  --jh-led-amber:  #d97706;
+  --jh-led-red:    #dc2626;
 }
 
+/* ── Tailwind v4 theme tokens ───────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background:     var(--jh-bg);
+  --color-foreground:     var(--jh-text);
+
+  --color-jh-bg:          var(--jh-bg);
+  --color-jh-panel:       var(--jh-panel);
+  --color-jh-border:      var(--jh-border);
+  --color-jh-border-mid:  var(--jh-border-mid);
+  --color-jh-border-lt:   var(--jh-border-lt);
+  --color-jh-text:        var(--jh-text);
+  --color-jh-dim:         var(--jh-dim);
+  --color-jh-green:       var(--jh-green);
+  --color-jh-amber:       var(--jh-amber);
+  --color-jh-red:         var(--jh-red);
+  --color-jh-led-green:   var(--jh-led-green);
+  --color-jh-led-amber:   var(--jh-led-amber);
+  --color-jh-led-red:     var(--jh-led-red);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ── Base ───────────────────────────────────────────────────── */
+body {
+  background: var(--jh-bg);
+  color: var(--jh-text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* ── Sketch / hand-drawn font ───────────────────────────────── */
+.font-sketch {
+  font-family: var(--font-caveat), cursive;
+}
+
+/* ── Screw head — circular mounting detail ──────────────────── */
+/* Applied to absolutely-positioned divs at panel corners.      */
+/* Cross-slot pseudo-elements removed — sub-pixel artifacts     */
+/* at 8×8px on Linux/some renderers.                            */
+.jh-screw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--jh-border-mid);
+  background: var(--jh-bg);
+  box-shadow: inset 0 0.5px 1px rgba(0,0,0,0.12);
+}
+
+/* ── Mounted panel — border + depth ────────────────────────── */
+.jh-panel-deep {
+  border: 1.5px solid var(--jh-border);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.07);
+}
+
+/* ── LED pulse — for active / firing alerts ─────────────────── */
+@keyframes jh-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+.jh-led-pulse {
+  animation: jh-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── Dashboard grid (desktop only) ─────────────────────────── */
+@media (min-width: 1024px) {
+  .jh-dash {
+    display: grid;
+    gap: 6px;
+    grid-template-areas:
+      "status  readouts"
+      "classes matrix"
+      "strip   strip";
+    grid-template-columns: 260px 1fr;
+    grid-template-rows: auto auto auto;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ── details/summary reset for trigger rows ─────────────────── */
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details > summary::-webkit-details-marker {
+  display: none;
 }

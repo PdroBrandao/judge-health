@@ -1,6 +1,7 @@
 // ============================================================
-// ConfusionMatrixDisplay – binary PASS/FAIL matrix
+// ConfusionMatrixDisplay — binary PASS/FAIL matrix
 // Positive class = FAIL (minority / high-stakes)
+// Engineering instrument aesthetic — thin lines, monospace
 // ============================================================
 import type { BinaryConfusionMatrix } from "@/core/types";
 
@@ -8,75 +9,77 @@ interface Props {
   matrix: BinaryConfusionMatrix;
 }
 
-interface Cell {
-  label: string;
-  value: number;
-  colorClass: string;
-  note?: string;
-}
-
 export function ConfusionMatrixDisplay({ matrix }: Props) {
   const { TP, FP, TN, FN } = matrix;
-
-  const cells: Cell[][] = [
-    [
-      {
-        label: "TP – Correct FAIL",
-        value: TP,
-        colorClass: "bg-green-100 border-green-400 text-green-900",
-        note: "Evaluator=FAIL, Truth=FAIL",
-      },
-      {
-        label: "FN – Missed FAIL",
-        value: FN,
-        colorClass: "bg-red-100 border-red-400 text-red-900",
-        note: "Evaluator=PASS, Truth=FAIL ← high-stakes miss",
-      },
-    ],
-    [
-      {
-        label: "FP – False Alarm",
-        value: FP,
-        colorClass: "bg-orange-50 border-orange-300 text-orange-800",
-        note: "Evaluator=FAIL, Truth=PASS",
-      },
-      {
-        label: "TN – Correct PASS",
-        value: TN,
-        colorClass: "bg-green-50 border-green-300 text-green-800",
-        note: "Evaluator=PASS, Truth=PASS",
-      },
-    ],
-  ];
+  const total = TP + FP + TN + FN;
 
   return (
-    <div className="space-y-2">
-      {/* Axis labels */}
-      <div className="grid grid-cols-[80px_1fr_1fr] text-xs text-slate-500 font-medium">
+    <div>
+      {/* Axis legend — PREDICTED */}
+      <div className="grid grid-cols-[56px_1fr_1fr] mb-0.5">
         <div />
-        <div className="text-center">Predicted FAIL</div>
-        <div className="text-center">Predicted PASS</div>
+        <div className="text-center text-[10px] font-mono text-jh-dim py-0.5 border-b border-jh-border-lt">
+          Predicted FAIL
+        </div>
+        <div className="text-center text-[10px] font-mono text-jh-dim py-0.5 border-b border-jh-border-lt">
+          Predicted PASS
+        </div>
       </div>
 
-      {cells.map((row, ri) => (
-        <div key={ri} className="grid grid-cols-[80px_1fr_1fr] gap-2 items-center">
-          <div className="text-xs text-slate-500 font-medium text-right pr-2">
-            {ri === 0 ? "Truth FAIL" : "Truth PASS"}
-          </div>
-          {row.map((cell, ci) => (
-            <div
-              key={ci}
-              className={`rounded border-2 p-3 text-center ${cell.colorClass}`}
-            >
-              <div className="text-2xl font-bold tabular-nums">{cell.value}</div>
-              <div className="text-[10px] font-semibold mt-0.5">{cell.label}</div>
-              {cell.note && (
-                <div className="text-[10px] opacity-70 mt-0.5">{cell.note}</div>
-              )}
-            </div>
-          ))}
+      {/* TRUTH FAIL row */}
+      <div className="grid grid-cols-[56px_1fr_1fr] items-stretch">
+        <div className="flex items-center justify-end pr-2">
+          <span className="text-[10px] font-mono text-jh-dim [writing-mode:vertical-rl] rotate-180">
+            Truth FAIL
+          </span>
         </div>
-      ))}
+
+        {/* TP */}
+        <div className="border border-jh-border p-2 text-center">
+          <div className="text-xl font-mono font-bold text-jh-text tabular-nums">{TP}</div>
+          <div className="text-[10px] font-mono text-jh-green font-semibold mt-0.5">TP</div>
+          <div className="text-[9px] text-jh-dim mt-0.5 leading-tight">Correct FAIL</div>
+        </div>
+
+        {/* FN — most dangerous cell */}
+        <div className="border border-jh-border p-2 text-center border-l-0" style={{ background: "rgba(153,27,27,0.05)" }}>
+          <div className="text-xl font-mono font-bold text-jh-red tabular-nums">{FN}</div>
+          <div className="text-[10px] font-mono text-jh-red font-semibold mt-0.5">FN ←</div>
+          <div className="text-[9px] text-jh-dim mt-0.5 leading-tight">Missed FAIL</div>
+        </div>
+      </div>
+
+      {/* TRUTH PASS row */}
+      <div className="grid grid-cols-[56px_1fr_1fr] items-stretch border-t-0">
+        <div className="flex items-center justify-end pr-2">
+          <span className="text-[10px] font-mono text-jh-dim [writing-mode:vertical-rl] rotate-180">
+            Truth PASS
+          </span>
+        </div>
+
+        {/* FP */}
+        <div className="border border-jh-border border-t-0 p-2 text-center">
+          <div className="text-xl font-mono font-bold text-jh-amber tabular-nums">{FP}</div>
+          <div className="text-[10px] font-mono text-jh-amber font-semibold mt-0.5">FP</div>
+          <div className="text-[9px] text-jh-dim mt-0.5 leading-tight">False Alarm</div>
+        </div>
+
+        {/* TN */}
+        <div className="border border-jh-border border-t-0 border-l-0 p-2 text-center">
+          <div className="text-xl font-mono font-bold text-jh-text tabular-nums">{TN}</div>
+          <div className="text-[10px] font-mono text-jh-green font-semibold mt-0.5">TN</div>
+          <div className="text-[9px] text-jh-dim mt-0.5 leading-tight">Correct PASS</div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="mt-2 pt-2 border-t border-jh-border-lt text-[10px] font-mono text-jh-dim space-y-0.5">
+        <div>n={total} · positive class = FAIL (minority / high-stakes)</div>
+        <div>
+          <span className="text-jh-red">FN = evaluator misses a FAIL</span>
+          {" — "}high-stakes miss, primary concern
+        </div>
+      </div>
     </div>
   );
 }

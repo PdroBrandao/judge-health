@@ -1,5 +1,9 @@
 // ============================================================
-// TriggerCard – displays a single trigger result
+// TriggerRow — compact horizontal trigger display
+// Uses <details>/<summary> for rationale expansion (no JS needed)
+//
+// Principle: a trigger is evidence to investigate,
+// NOT evidence that the evaluator is wrong.
 // ============================================================
 import type { TriggerResult } from "@/core/types";
 import { pct } from "@/core/metrics";
@@ -11,73 +15,82 @@ interface Props {
 export function TriggerCard({ result }: Props) {
   const { config, fired, observedValue, note } = result;
 
-  const borderClass = fired
-    ? "border-red-400 bg-red-50"
-    : "border-green-300 bg-green-50";
-
-  const badgeClass = fired
-    ? "bg-red-600 text-white"
-    : "bg-green-600 text-white";
-
-  const typeLabel =
-    config.type === "metric" ? "Metric Trigger" : "Change Trigger";
+  const rowBg = fired ? "bg-red-50/60" : "";
+  const statusLabel = fired ? "FIRED" : "OK";
+  const statusColor = fired ? "text-jh-red" : "text-jh-green";
+  const typeLabel = config.type === "metric" ? "METRIC" : "CHANGE";
 
   return (
-    <div className={`rounded-lg border-2 p-4 ${borderClass}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              {typeLabel}
-            </span>
-            <span
-              className={`text-xs font-semibold px-2 py-0.5 rounded ${badgeClass}`}
-            >
-              {fired ? "FIRED" : "OK"}
-            </span>
-          </div>
+    <details className={`border-b border-jh-border-lt last:border-b-0 ${rowBg}`}>
+      <summary className="flex items-center gap-2 py-1.5 px-2 cursor-pointer select-none">
+        {/* Status indicator */}
+        <div
+          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            fired
+              ? "bg-jh-led-red shadow-[0_0_4px_var(--jh-led-red)]"
+              : "bg-jh-led-green"
+          }`}
+          aria-hidden="true"
+        />
 
-          <div className="mt-1 font-mono text-sm font-semibold text-slate-800">
-            {config.id}
-          </div>
+        {/* Status label */}
+        <span className={`font-mono text-[10px] font-bold w-8 shrink-0 ${statusColor}`}>
+          {statusLabel}
+        </span>
 
-          {config.type === "metric" && (
-            <div className="mt-1 text-sm text-slate-600">
-              <span className="font-medium">{config.metric}</span>{" "}
-              <span className="font-mono text-slate-500">
-                {config.operator} {pct(config.threshold)}
-              </span>
-              {observedValue !== undefined && (
-                <span className="ml-2 text-slate-700">
-                  → observed:{" "}
-                  <span
-                    className={`font-semibold ${fired ? "text-red-700" : "text-green-700"}`}
-                  >
-                    {pct(observedValue)}
-                  </span>
-                </span>
-              )}
-            </div>
-          )}
+        {/* Type */}
+        <span className="font-mono text-[10px] text-jh-dim w-14 shrink-0">
+          {typeLabel}
+        </span>
 
-          {config.type === "change" && (
-            <div className="mt-1 text-sm text-slate-600">
-              event: <span className="font-mono">{config.event}</span>
-            </div>
-          )}
+        {/* ID */}
+        <span className="font-mono text-[10px] text-jh-text flex-1 truncate">
+          {config.id}
+        </span>
 
-          {note && (
-            <div className="mt-2 text-xs text-slate-500 italic leading-relaxed">
-              {note}
-            </div>
-          )}
+        {/* Metric condition */}
+        {config.type === "metric" && (
+          <span className="font-mono text-[10px] text-jh-dim shrink-0">
+            {config.metric}&nbsp;
+            <span className="text-jh-border-mid">{config.operator}</span>
+            &nbsp;{pct(config.threshold)}
+          </span>
+        )}
 
-          <div className="mt-2 text-xs text-slate-400 border-t border-slate-200 pt-2">
-            <span className="font-medium text-slate-500">Rationale:</span>{" "}
-            {config.rationale}
-          </div>
-        </div>
+        {/* Observed value */}
+        {observedValue !== undefined && (
+          <span
+            className={`font-mono text-[10px] font-semibold tabular-nums w-12 text-right shrink-0 ${
+              fired ? "text-jh-red" : "text-jh-green"
+            }`}
+          >
+            {pct(observedValue)}
+          </span>
+        )}
+
+        {/* Expand chevron */}
+        <span className="font-mono text-[10px] text-jh-dim ml-1 shrink-0">
+          ›
+        </span>
+      </summary>
+
+      {/* Expanded content */}
+      <div className="px-5 pb-2 pt-0.5 space-y-1 border-t border-jh-border-lt bg-jh-bg/40">
+        {note && (
+          <p className="text-[10px] font-mono text-jh-dim leading-relaxed italic">
+            {note}
+          </p>
+        )}
+        {config.type === "change" && (
+          <p className="text-[10px] font-mono text-jh-dim">
+            event:&nbsp;<span className="text-jh-text">{config.event}</span>
+          </p>
+        )}
+        <p className="text-[10px] text-jh-dim leading-relaxed border-t border-jh-border-lt pt-1 mt-1">
+          <span className="font-semibold text-jh-dim">Rationale:</span>{" "}
+          {config.rationale}
+        </p>
       </div>
-    </div>
+    </details>
   );
 }

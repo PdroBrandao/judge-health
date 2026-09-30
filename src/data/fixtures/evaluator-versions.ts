@@ -22,23 +22,16 @@ export const evaluatorVersions: EvaluatorVersion[] = [
       "Rubric clarification: added explicit examples for FAIL-class edge cases. " +
       "Validated against representative reference before promotion.",
   },
-  {
-    version: "v0.3.0-candidate",
-    status: "candidate",
-    createdAt: "2026-09-20",
-    rubricVersion: "rubric-v0.2",
-    taxonomyVersion: "taxonomy-v0.2",
-    changeDescription:
-      "Taxonomy update: new subcategory added. Under revalidation.",
-  },
 ];
+
+// Milestone 3: candidate version is created dynamically by the
+// Intervention workflow (WorkflowStore.createCandidate). It is no
+// longer pre-populated as a fixture. getCandidateJudgments() in the
+// fixture repository still provides pre-computed judgments for
+// deterministic revalidation metrics.
 
 export const activeEvaluatorVersion = evaluatorVersions.find(
   (v) => v.status === "active"
-)!;
-
-export const candidateEvaluatorVersion = evaluatorVersions.find(
-  (v) => v.status === "candidate"
 )!;
 
 export const rubricVersions = [

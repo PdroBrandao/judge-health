@@ -15,7 +15,8 @@ export type EvaluatorStatus =
   | "candidate"
   | "validated"
   | "active"
-  | "superseded";
+  | "superseded"
+  | "rejected";
 
 // ── Trigger types ─────────────────────────────────────────────
 export type TriggerType = "metric" | "change";
@@ -136,6 +137,64 @@ export interface SamplingPlan {
   stratificationNote: string;
 }
 
+// ── Case content (UI layer — evidence screens) ────────────────
+// Stored separately so core metrics are unaffected.
+export interface CaseContent {
+  caseId: string;
+  /** Customer or user input / conversation context */
+  input: string;
+  /** AI system output being evaluated */
+  systemOutput: string;
+  /** Evaluator rationale for its judgment */
+  evaluatorRationale?: string;
+  /** Why this case was selected for targeted/risk review */
+  riskNote?: string;
+}
+
+// ── Human reference record ─────────────────────────────────────
+// "Human reference" — never "ground truth" in the UI.
+export interface HumanReferenceRecord {
+  caseId: string;
+  reviewerAlias: string;
+  label: Label;
+  rationale: string;
+  reviewedAt: string;
+}
+
+// ── Result quad for a single judged case ──────────────────────
+export type CaseResult = "TP" | "FP" | "TN" | "FN";
+
+export function computeResult(truth: Label, predicted: Label): CaseResult {
+  if (truth === "FAIL" && predicted === "FAIL") return "TP";
+  if (truth === "PASS" && predicted === "FAIL") return "FP";
+  if (truth === "PASS" && predicted === "PASS") return "TN";
+  return "FN"; // truth=FAIL, predicted=PASS — missed FAIL
+}
+
+// ── Evidence summary row (for list view) ─────────────────────
+export interface EvidenceSummary {
+  caseId: string;
+  sampleType: SampleType;
+  groundTruth: Label;
+  evaluatorLabel: Label;
+  result: CaseResult;
+  hasContent: boolean;
+  inputPreview?: string; // first ~90 chars of input
+  riskNote?: string;
+}
+
+// ── Full case detail (for detail view) ───────────────────────
+export interface CaseDetailData {
+  caseId: string;
+  sampleType: SampleType;
+  groundTruth: Label;
+  evaluatorLabel: Label;
+  evaluatorVersion: string;
+  result: CaseResult;
+  content: CaseContent;
+  humanReference?: HumanReferenceRecord;
+}
+
 // ── Evaluator version record ──────────────────────────────────
 export interface EvaluatorVersion {
   version: string;
@@ -144,4 +203,52 @@ export interface EvaluatorVersion {
   rubricVersion: string;
   taxonomyVersion: string;
   changeDescription?: string;
+}
+
+// ── Workflow: Blind Human Review ──────────────────────────────
+// Separate from HumanReferenceRecord (fixture). Never overwrites
+// fixture reference. All three are displayed side by side.
+export interface BlindHumanReview {
+  id: string;
+  caseId: string;
+  reviewerAlias: string;
+  label: Label;
+  rationale: string;
+  submittedAt: string;
+}
+
+// ── Workflow: Diagnosis Record ────────────────────────────────
+export interface DiagnosisRecord {
+  id: string;
+  triggerId: string;
+  evaluatorVersion: string;
+  category: DiagnosisCategory;
+  observationNote: string;
+  revalidationRequested: boolean;
+  status: "open" | "intervention_created" | "resolved";
+  createdAt: string;
+}
+
+// ── Workflow: Intervention Record ─────────────────────────────
+// Created from a diagnosis. Never mutates the active evaluator.
+// Creates a new candidate when submitted.
+export interface InterventionRecord {
+  id: string;
+  diagnosisId: string;
+  baselineEvaluatorVersion: string;
+  baselineRubricVersion: string;
+  proposedRubricText: string;
+  rationale: string;
+  status: "draft" | "candidate_created";
+  createdAt: string;
+}
+
+// ── Workflow: Revalidation Decision ──────────────────────────
+export interface RevalidationDecision {
+  id: string;
+  candidateVersion: string;
+  baselineVersion: string;
+  decision: "accepted" | "rejected";
+  rationale: string;
+  decidedAt: string;
 }

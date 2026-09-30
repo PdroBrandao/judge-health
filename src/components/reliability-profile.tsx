@@ -1,136 +1,89 @@
 // ============================================================
-// ReliabilityProfilePanel – per-class metrics with Wilson CIs
+// ReliabilityProfilePanel — per-class metrics
+// Exported for use in stacked/mobile layout only.
+// Desktop layout uses MetricReadout directly in page.tsx.
 // ============================================================
-import type { ReliabilityProfile, Label } from "@/core/types";
+import type { ReliabilityProfile } from "@/core/types";
 import { pct } from "@/core/metrics";
+import { MetricReadout } from "@/components/instrument/MetricReadout";
 
 interface Props {
   profile: ReliabilityProfile;
+  alertThreshold?: number; // FAIL recall threshold — highlights row if below
 }
 
-function CI({ lower, upper }: { lower: number; upper: number }) {
-  return (
-    <span className="text-slate-400 text-xs">
-      ({pct(lower)} – {pct(upper)})
-    </span>
-  );
+function ciStr(lower: number, upper: number): string {
+  return `${pct(lower)} – ${pct(upper)}`;
 }
 
-function MetricRow({
-  label,
-  value,
-  ci,
-  highlight,
-}: {
-  label: string;
-  value: number;
-  ci?: { lower: number; upper: number };
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center justify-between py-1.5 px-2 rounded ${
-        highlight ? "bg-red-50 border border-red-200" : ""
-      }`}
-    >
-      <span className="text-sm text-slate-600">{label}</span>
-      <div className="text-right">
-        <span
-          className={`font-semibold tabular-nums ${
-            highlight ? "text-red-700" : "text-slate-800"
-          }`}
-        >
-          {pct(value)}
-        </span>
-        {ci && (
-          <div>
-            <CI lower={ci.lower} upper={ci.upper} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ClassCard({ label, profile }: { label: Label; profile: ReliabilityProfile }) {
-  const m = profile.perClass[label];
-  const isFail = label === "FAIL";
-  const headerClass = isFail
-    ? "bg-red-600 text-white"
-    : "bg-green-600 text-white";
+export function ReliabilityProfilePanel({
+  profile,
+  alertThreshold = 0.7,
+}: Props) {
+  const { perClass, overallAgreement, overallAgreementCI, sampleN, uncertainty } = profile;
 
   return (
-    <div className="rounded-lg overflow-hidden border border-slate-200 shadow-sm">
-      <div className={`px-3 py-2 font-semibold text-sm flex justify-between ${headerClass}`}>
-        <span>{label} class</span>
-        <span className="text-xs font-normal opacity-80">n={m.support}</span>
-      </div>
-      <div className="p-3 space-y-1 bg-white">
-        <MetricRow
-          label="Recall (sensitivity)"
-          value={m.recall}
-          ci={m.recallCI}
-          highlight={isFail && m.recall < 0.7}
-        />
-        <MetricRow
-          label="Precision"
-          value={m.precision}
-          ci={m.precisionCI}
-        />
-        <MetricRow
-          label="False Positive Rate"
-          value={m.falsePositiveRate}
-        />
-        <MetricRow
-          label="False Negative Rate"
-          value={m.falseNegativeRate}
-        />
-      </div>
-    </div>
-  );
-}
-
-export function ReliabilityProfilePanel({ profile }: Props) {
-  return (
-    <div className="space-y-4">
+    <div className="space-y-0">
       {/* Overall agreement */}
-      <div className="flex items-center justify-between bg-slate-50 rounded-lg p-4 border border-slate-200">
+      <div className="flex items-baseline justify-between px-2 py-2 border-b border-jh-border bg-jh-bg/30">
         <div>
-          <div className="text-sm font-medium text-slate-600">Overall Agreement</div>
-          <div className="text-xs text-slate-400">
-            n={profile.sampleN} representative cases
-          </div>
+          <span className="font-mono text-[11px] text-jh-dim">Overall Agreement</span>
+          <span className="font-mono text-[10px] text-jh-border-mid ml-2">n={sampleN} representative</span>
         </div>
         <div className="text-right">
-          <div className="text-3xl font-bold tabular-nums text-slate-800">
-            {pct(profile.overallAgreement)}
-          </div>
-          <div className="text-xs text-slate-400">
-            95% CI{" "}
-            <CI
-              lower={profile.overallAgreementCI.lower}
-              upper={profile.overallAgreementCI.upper}
-            />
-          </div>
+          <span className="font-mono font-bold text-lg tabular-nums text-jh-text">
+            {pct(overallAgreement)}
+          </span>
+          <span className="block font-mono text-[10px] text-jh-dim">
+            95% CI {ciStr(overallAgreementCI.lower, overallAgreementCI.upper)}
+          </span>
         </div>
       </div>
 
-      {/* Per-class breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <ClassCard label="FAIL" profile={profile} />
-        <ClassCard label="PASS" profile={profile} />
+      {/* FAIL class section */}
+      <div className="px-2 py-1 border-b border-jh-border-lt bg-jh-bg/60">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-jh-dim">
+          FAIL Class · n={perClass.FAIL.support}
+        </span>
       </div>
+      <MetricReadout
+        label="Recall (sensitivity)"
+        value={pct(perClass.FAIL.recall)}
+        ci={ciStr(perClass.FAIL.recallCI.lower, perClass.FAIL.recallCI.upper)}
+        alert={perClass.FAIL.recall < alertThreshold}
+      />
+      <MetricReadout
+        label="Precision"
+        value={pct(perClass.FAIL.precision)}
+        ci={ciStr(perClass.FAIL.precisionCI.lower, perClass.FAIL.precisionCI.upper)}
+      />
+      <MetricReadout label="False Positive Rate" value={pct(perClass.FAIL.falsePositiveRate)} />
+      <MetricReadout label="False Negative Rate" value={pct(perClass.FAIL.falseNegativeRate)} />
 
-      {/* Uncertainty note */}
-      <div className="text-xs text-slate-500 bg-amber-50 border border-amber-200 rounded p-3">
-        <span className="font-semibold text-amber-700">Uncertainty:</span>{" "}
-        {profile.uncertainty.note} Widest recall CI: {profile.uncertainty.widestRecallClass} class
-        (
-        <CI
-          lower={profile.uncertainty.widestRecallCI.lower}
-          upper={profile.uncertainty.widestRecallCI.upper}
-        />
-        ).
+      {/* PASS class section */}
+      <div className="px-2 py-1 border-b border-jh-border-lt border-t border-jh-border bg-jh-bg/60">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-jh-dim">
+          PASS Class · n={perClass.PASS.support}
+        </span>
+      </div>
+      <MetricReadout
+        label="Recall (sensitivity)"
+        value={pct(perClass.PASS.recall)}
+        ci={ciStr(perClass.PASS.recallCI.lower, perClass.PASS.recallCI.upper)}
+      />
+      <MetricReadout
+        label="Precision"
+        value={pct(perClass.PASS.precision)}
+        ci={ciStr(perClass.PASS.precisionCI.lower, perClass.PASS.precisionCI.upper)}
+      />
+      <MetricReadout label="False Positive Rate" value={pct(perClass.PASS.falsePositiveRate)} />
+      <MetricReadout label="False Negative Rate" value={pct(perClass.PASS.falseNegativeRate)} />
+
+      {/* Uncertainty */}
+      <div className="px-2 py-1.5 border-t border-jh-border text-[10px] font-mono text-jh-dim bg-amber-50/30">
+        <span className="font-semibold text-jh-amber">Uncertainty:</span>{" "}
+        {uncertainty.note} Widest CI: {uncertainty.widestRecallClass} class (
+        {ciStr(uncertainty.widestRecallCI.lower, uncertainty.widestRecallCI.upper)}).
       </div>
     </div>
   );

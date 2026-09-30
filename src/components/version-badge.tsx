@@ -1,35 +1,34 @@
 // ============================================================
-// VersionBadge – displays evaluator/rubric/taxonomy version
+// VersionBadge — kept for backward compat (used in mobile layout)
+// Desktop layout uses InstrumentPlate directly.
 // ============================================================
 import type { EvaluatorStatus } from "@/core/types";
 
-const statusColors: Record<EvaluatorStatus, string> = {
-  draft:      "bg-gray-100 text-gray-600 border-gray-300",
-  candidate:  "bg-yellow-50 text-yellow-700 border-yellow-400",
-  validated:  "bg-blue-50 text-blue-700 border-blue-400",
-  active:     "bg-green-50 text-green-700 border-green-500",
-  superseded: "bg-slate-100 text-slate-500 border-slate-300",
+const STATUS_STYLES: Record<EvaluatorStatus, string> = {
+  draft:      "text-jh-dim border-jh-border-lt",
+  candidate:  "text-jh-amber border-jh-amber",
+  validated:  "text-jh-green border-jh-green",
+  active:     "text-jh-green border-jh-green font-bold",
+  superseded: "text-jh-dim border-jh-border-lt line-through",
 };
 
-interface VersionBadgeProps {
+interface Props {
   label: string;
   version: string;
   status?: EvaluatorStatus;
 }
 
-export function VersionBadge({ label, version, status }: VersionBadgeProps) {
-  const colorClass = status ? statusColors[status] : "bg-gray-100 text-gray-700 border-gray-300";
+export function VersionBadge({ label, version, status }: Props) {
+  const style = status ? STATUS_STYLES[status] : "text-jh-text border-jh-border-lt";
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide w-24 shrink-0">
+      <span className="text-[10px] font-mono text-jh-dim uppercase tracking-wide w-20 shrink-0">
         {label}
       </span>
-      <span
-        className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-mono font-semibold ${colorClass}`}
-      >
+      <span className={`inline-flex items-center border px-1.5 py-0.5 text-[10px] font-mono ${style}`}>
         {version}
         {status && (
-          <span className="ml-1 font-sans font-normal opacity-70">
+          <span className="ml-1.5 font-normal opacity-60 normal-case">
             [{status}]
           </span>
         )}
