@@ -34,21 +34,28 @@ const NAV_LINKS = [
 export async function AppNav() {
   // ── Compute current system state ─────────────────────────────
   const cases          = FixtureRepository.getCases();
-  const judgments      = FixtureRepository.getBaselineJudgments();
   const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
   const triggerConfigs = FixtureRepository.getTriggerConfigs();
   const currentConfig  = FixtureRepository.getCurrentConfiguration();
   const baselineConfig = FixtureRepository.getBaselineConfiguration();
+
+  // Use live baseline if available; fall back to fixture
+  const { RunStore, liveJudgmentsToJudgments } = await import("@/data/run-store");
+  const liveRun = RunStore.getBaselineRun();
+  const isLive  = liveRun?.mode === "live" &&
+    (liveRun.status === "completed" || liveRun.status === "partial_failure");
+  const judgments = isLive
+    ? liveJudgmentsToJudgments(liveRun!.judgments)
+    : FixtureRepository.getBaselineJudgments();
 
   const profile = computeReliabilityProfile(cases, judgments, activeVersion.version);
   const triggerResults = evaluateAllTriggers(
     triggerConfigs, profile, currentConfig, baselineConfig
   );
 
-  const firedCount = triggerResults.filter((t) => t.fired).length;
-  const isHealthy  = firedCount === 0;
-  const ledStatus  = isHealthy ? "ok" : ("error" as const);
-  const sealStatus = isHealthy ? "VALIDATED" : "DEGRADED";
+  const firedCount = isLive ? triggerResults.filter((t) => t.fired).length : 0;
+  const isHealthy  = isLive ? firedCount === 0 : true;
+  const ledStatus  = !isLive ? ("inactive" as const) : isHealthy ? "ok" : ("error" as const);
 
   return (
     <nav
@@ -72,19 +79,35 @@ export async function AppNav() {
           <span className="font-mono text-[9px] text-jh-dim border border-jh-border-lt px-1.5 py-0.5 ml-1">
             JH-001
           </span>
+          {/* Mode badge */}
+          {isLive ? (
+            <span className="font-mono text-[9px] border border-jh-green/60 text-jh-green px-1.5 py-0.5 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-jh-led-green inline-block" />
+              LIVE
+            </span>
+          ) : (
+            <span className="font-mono text-[9px] text-jh-border-mid border border-jh-border-lt px-1.5 py-0.5">
+              FIXTURE
+            </span>
+          )}
         </div>
 
         {/* Right: system state */}
         <div className="flex items-center gap-3">
-          <StatusLED status={ledStatus} pulse={!isHealthy} />
-          <CalibrationSeal status={sealStatus} compact />
-          {!isHealthy && (
+          <StatusLED status={ledStatus} pulse={isLive && !isHealthy} />
+          {isLive && <CalibrationSeal status={isHealthy ? "VALIDATED" : "DEGRADED"} compact />}
+          {isLive && !isHealthy && (
             <Link
               href="/evidence"
               className="font-mono text-[10px] text-jh-red border border-jh-red/40 px-2 py-0.5 hover:bg-red-50/50 transition-colors"
             >
               {firedCount} trigger{firedCount > 1 ? "s" : ""} fired — Investigate →
             </Link>
+          )}
+          {!isLive && (
+            <span className="font-mono text-[10px] text-jh-border-mid border border-jh-border-lt px-2 py-0.5">
+              NOT EVALUATED
+            </span>
           )}
         </div>
       </div>
@@ -107,9 +130,9 @@ export async function AppNav() {
 
         {/* Right: LED + state label only (no CalibrationSeal on mobile) */}
         <div className="flex items-center gap-2">
-          <StatusLED status={ledStatus} pulse={!isHealthy} />
-          <span className={`font-mono text-[10px] font-semibold ${isHealthy ? "text-jh-green" : "text-jh-red"}`}>
-            {sealStatus}
+          <StatusLED status={ledStatus} pulse={isLive && !isHealthy} />
+          <span className={`font-mono text-[10px] font-semibold ${!isLive ? "text-jh-border-mid" : isHealthy ? "text-jh-green" : "text-jh-red"}`}>
+            {!isLive ? "—" : isHealthy ? "VALIDATED" : "DEGRADED"}
           </span>
         </div>
       </div>

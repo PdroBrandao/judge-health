@@ -12,22 +12,40 @@
 // ============================================================
 import { FixtureRepository } from "@/data/fixture-repository";
 import { WorkflowStore } from "@/data/workflow-store";
+import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
 import { computeReliabilityProfile, pct } from "@/core/metrics";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { StatusLED } from "@/components/instrument/StatusLED";
 import { ConfusionMatrixDisplay } from "@/components/confusion-matrix";
 import { RevalidationClient } from "@/components/RevalidationClient";
+import { LiveRunPanel } from "@/components/LiveRunPanel";
 
 export default function RevalidationPage() {
   // ── Baseline (active) evaluator ───────────────────────────
-  const cases             = FixtureRepository.getCases();
-  const baselineJudgments = FixtureRepository.getBaselineJudgments();
-  const activeVersion     = FixtureRepository.getActiveEvaluatorVersion();
-  const activeRubric      = FixtureRepository.getActiveRubricVersion();
-  const activeTaxonomy    = FixtureRepository.getActiveTaxonomyVersion();
+  const cases          = FixtureRepository.getCases();
+  const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
+  const activeRubric   = FixtureRepository.getActiveRubricVersion();
+  const activeTaxonomy = FixtureRepository.getActiveTaxonomyVersion();
+
+  // Live runs override fixture data when available
+  const liveBaselineRun   = RunStore.getBaselineRun();
+  const liveCandidateRun  = RunStore.getCandidateRun();
+
+  const baselineIsLive = liveBaselineRun?.mode === "live" &&
+    (liveBaselineRun.status === "completed" || liveBaselineRun.status === "partial_failure");
+  const candidateIsLive = liveCandidateRun?.mode === "live" &&
+    (liveCandidateRun.status === "completed" || liveCandidateRun.status === "partial_failure");
+
+  const baselineJudgments = baselineIsLive
+    ? liveJudgmentsToJudgments(liveBaselineRun!.judgments)
+    : FixtureRepository.getBaselineJudgments();
+
+  const baselineVersionLabel = baselineIsLive
+    ? liveBaselineRun!.evaluatorVersion
+    : activeVersion.version;
 
   const baselineProfile = computeReliabilityProfile(
-    cases, baselineJudgments, activeVersion.version
+    cases, baselineJudgments, baselineVersionLabel
   );
 
   // ── Candidate from WorkflowStore ──────────────────────────
@@ -108,30 +126,48 @@ export default function RevalidationPage() {
     );
   }
 
-  // ── Candidate judgments from fixture (deterministic) ─────
-  // The candidate version metadata comes from WorkflowStore (created by
-  // the Intervention step). The actual judgments used for metrics are
-  // the pre-computed fixture judgments — this is deliberate: the fixture
-  // represents what we'd expect from the proposed rubric changes.
-  const candidateJudgments = FixtureRepository.getCandidateJudgments();
+  // ── Candidate judgments ───────────────────────────────────
+  // INVARIANT: candidate metrics only exist after a completed live candidate run.
+  // No fixture fallback in live mode — showing fixture candidate metrics before
+  // a real run would make invalid performance claims.
+  const candidateVersionLabel = candidateIsLive
+    ? liveCandidateRun!.evaluatorVersion
+    : candidateVersion.version;
 
-  const candidateProfile = computeReliabilityProfile(
-    cases, candidateJudgments, candidateVersion.version
-  );
+  const candidateProfile = candidateIsLive
+    ? computeReliabilityProfile(
+        cases,
+        liveJudgmentsToJudgments(liveCandidateRun!.judgments),
+        candidateVersionLabel
+      )
+    : null;
 
-  // ── Delta computations ────────────────────────────────────
-  const delta = {
-    agreement:   candidateProfile.overallAgreement - baselineProfile.overallAgreement,
-    failRecall:  candidateProfile.perClass.FAIL.recall - baselineProfile.perClass.FAIL.recall,
-    failPrec:    candidateProfile.perClass.FAIL.precision - baselineProfile.perClass.FAIL.precision,
-    passRecall:  candidateProfile.perClass.PASS.recall - baselineProfile.perClass.PASS.recall,
-    failFNR:     candidateProfile.perClass.FAIL.falseNegativeRate - baselineProfile.perClass.FAIL.falseNegativeRate,
-  };
+  // ── Intervention rubric (the changed variable) ────────────
+  const intervention = WorkflowStore.getIntervention();
+  const candidateRubricText = intervention?.proposedRubricText ?? candidateVersion.changeDescription ?? "";
 
+  // ── All case IDs for revalidation run (rep + targeted/risk) ──
+  const repCaseIds = cases.filter((c) => c.sampleType === "representative").map((c) => c.id);
+  const trgCaseIds = cases.filter((c) => c.sampleType === "targeted_risk").map((c) => c.id);
+  const allCaseIds = [...repCaseIds, ...trgCaseIds];
+  const liveModel  = process.env.OPENAI_EVALUATOR_MODEL ?? "gpt-5.6-luna";
+
+  // ── Gates ─────────────────────────────────────────────────
+  const liveRunsComplete = baselineIsLive && candidateIsLive;
+
+  // ── Deltas (only when candidate profile exists) ───────────
   const bF = baselineProfile.perClass.FAIL;
-  const cF = candidateProfile.perClass.FAIL;
   const bP = baselineProfile.perClass.PASS;
-  const cP = candidateProfile.perClass.PASS;
+  const cF = candidateProfile?.perClass.FAIL;
+  const cP = candidateProfile?.perClass.PASS;
+
+  const delta = candidateProfile ? {
+    agreement:  candidateProfile.overallAgreement - baselineProfile.overallAgreement,
+    failRecall: cF!.recall     - bF.recall,
+    failPrec:   cF!.precision  - bF.precision,
+    passRecall: cP!.recall     - bP.recall,
+    failFNR:    cF!.falseNegativeRate - bF.falseNegativeRate,
+  } : null;
 
   function sign(v: number) { return v >= 0 ? "+" : ""; }
   function deltaClass(v: number, higherIsBetter = true) {
@@ -183,8 +219,28 @@ export default function RevalidationPage() {
             </div>
           </div>
 
-          <div className="mt-2 font-mono text-[10px] text-jh-dim border border-jh-border-lt inline-flex items-center gap-2 px-2 py-1">
-            TEST ENVIRONMENT · FIXTURE DATA · NO LIVE MODEL
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            {baselineIsLive ? (
+              <span className="font-mono text-[10px] border border-jh-green/60 text-jh-green inline-flex items-center gap-1.5 px-2 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-jh-led-green inline-block" />
+                LIVE BASELINE · {liveBaselineRun?.model}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] text-jh-dim border border-jh-border-lt inline-flex items-center gap-2 px-2 py-1">
+                FIXTURE BASELINE
+              </span>
+            )}
+            {candidateIsLive ? (
+              <span className="font-mono text-[10px] border border-jh-green/60 text-jh-green inline-flex items-center gap-1.5 px-2 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-jh-led-green inline-block" />
+                LIVE CANDIDATE · {liveCandidateRun?.model}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] text-jh-amber border border-jh-amber/40 inline-flex items-center gap-1.5 px-2 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-jh-led-amber inline-block" />
+                CANDIDATE · NOT YET EVALUATED
+              </span>
+            )}
           </div>
         </div>
 
@@ -270,53 +326,55 @@ export default function RevalidationPage() {
                   {
                     metric: "Overall Agreement",
                     base: pct(baselineProfile.overallAgreement),
-                    cand: pct(candidateProfile.overallAgreement),
-                    d: delta.agreement,
+                    cand: candidateProfile ? pct(candidateProfile.overallAgreement) : null,
+                    d: delta?.agreement,
                     better: true,
                   },
                   {
                     metric: "FAIL Recall (sensitivity)",
                     base: pct(bF.recall),
-                    cand: pct(cF.recall),
-                    d: delta.failRecall,
+                    cand: cF ? pct(cF.recall) : null,
+                    d: delta?.failRecall,
                     better: true,
                     highlight: true,
                   },
                   {
                     metric: "FAIL Precision",
                     base: pct(bF.precision),
-                    cand: pct(cF.precision),
-                    d: delta.failPrec,
+                    cand: cF ? pct(cF.precision) : null,
+                    d: delta?.failPrec,
                     better: true,
                   },
                   {
                     metric: "FAIL False Negative Rate",
                     base: pct(bF.falseNegativeRate),
-                    cand: pct(cF.falseNegativeRate),
-                    d: delta.failFNR,
+                    cand: cF ? pct(cF.falseNegativeRate) : null,
+                    d: delta?.failFNR,
                     better: false,
                   },
                   {
                     metric: "PASS Recall",
                     base: pct(bP.recall),
-                    cand: pct(cP.recall),
-                    d: delta.passRecall,
+                    cand: cP ? pct(cP.recall) : null,
+                    d: delta?.passRecall,
                     better: true,
                   },
                   {
                     metric: "PASS Precision",
                     base: pct(bP.precision),
-                    cand: pct(cP.precision),
-                    d: 0,
+                    cand: cP ? pct(cP.precision) : null,
+                    d: null,
                     better: true,
                   },
                 ].map(({ metric, base, cand, d, better, highlight }) => (
                   <tr key={metric} className={highlight ? "bg-red-50/10" : ""}>
                     <td className={`px-3 py-2 ${highlight ? "font-semibold" : ""}`}>{metric}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{base}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{cand}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${deltaClass(d, better)}`}>
-                      {sign(d)}{pct(d)}
+                    <td className={`px-3 py-2 text-right tabular-nums ${!cand ? "text-jh-border-mid" : ""}`}>
+                      {cand ?? "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${d != null ? deltaClass(d, better) : "text-jh-border-mid"}`}>
+                      {d != null ? `${sign(d)}${pct(d)}` : "—"}
                     </td>
                   </tr>
                 ))}
@@ -324,26 +382,56 @@ export default function RevalidationPage() {
             </table>
           </div>
           <div className="px-3 py-1.5 border-t border-jh-border-lt bg-jh-bg/40 font-mono text-[9px] text-jh-dim">
-            Positive delta = candidate improves on baseline. Rep. sample n={baselineProfile.sampleN}.
+            {candidateProfile
+              ? `Positive delta = candidate improves on baseline. Rep. sample n=${baselineProfile.sampleN}.`
+              : "Run Live Revalidation to populate candidate metrics and deltas."}
           </div>
         </InstrumentPanel>
 
         {/* ── Confusion matrix side-by-side ─────────────────── */}
         <div className="grid grid-cols-2 gap-3">
-          <InstrumentPanel label={`Confusion Matrix — ${activeVersion.version} (Baseline)`}>
+          <InstrumentPanel label={`Confusion Matrix — ${baselineVersionLabel} (${baselineIsLive ? "LIVE" : "FIXTURE"} Baseline)`}>
             <ConfusionMatrixDisplay matrix={baselineProfile.confusionMatrix} />
           </InstrumentPanel>
-          <InstrumentPanel label={`Confusion Matrix — ${candidateVersion.version} (Candidate)`}>
-            <ConfusionMatrixDisplay matrix={candidateProfile.confusionMatrix} />
+          <InstrumentPanel label={`Confusion Matrix — ${candidateVersionLabel} (${candidateIsLive ? "LIVE" : "NOT EVALUATED"})`}>
+            {candidateProfile ? (
+              <ConfusionMatrixDisplay matrix={candidateProfile.confusionMatrix} />
+            ) : (
+              <div className="flex items-center justify-center py-8 font-mono text-[11px] text-jh-border-mid">
+                — not evaluated —
+              </div>
+            )}
           </InstrumentPanel>
         </div>
 
+        {/* ── Live candidate run panel (shown when no run, or partial_failure needs retry) ── */}
+        {(!candidateIsLive || liveCandidateRun?.status === "partial_failure") && (
+          <div className="space-y-2">
+            <div className="font-mono text-[10px] text-jh-dim border-b border-jh-border-lt pb-2">
+              Live Revalidation — same model, same cases, same reference labels, candidate rubric as the only changed variable
+            </div>
+            <LiveRunPanel
+              type="candidate"
+              sampleCaseIds={allCaseIds}
+              rubricText={candidateRubricText}
+              evaluatorVersion={candidateVersion.version}
+              rubricVersion={candidateVersion.rubricVersion}
+              taxonomyVersion={candidateVersion.taxonomyVersion}
+              model={liveModel}
+              existingRun={liveCandidateRun ?? undefined}
+            />
+          </div>
+        )}
+
         {/* ── Accept / Reject decision (client) ─────────────── */}
         <RevalidationClient
-          baselineVersion={activeVersion.version}
-          candidateVersion={candidateVersion.version}
-          deltaFailRecall={delta.failRecall}
+          baselineVersion={baselineVersionLabel}
+          candidateVersion={candidateVersionLabel}
+          deltaFailRecall={delta?.failRecall ?? 0}
           existingDecision={revalidationDecision}
+          liveRunsComplete={liveRunsComplete}
+          baselineIsLive={baselineIsLive}
+          candidateIsLive={candidateIsLive}
         />
 
       </div>

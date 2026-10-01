@@ -17,6 +17,12 @@ interface Props {
   candidateVersion: string;
   deltaFailRecall: number;
   existingDecision: RevalidationDecision | null;
+  /** When true, both live baseline and live candidate runs are complete. */
+  liveRunsComplete?: boolean;
+  /** True if baseline metrics come from a live OpenAI run. */
+  baselineIsLive?: boolean;
+  /** True if candidate metrics come from a completed live candidate run. */
+  candidateIsLive?: boolean;
 }
 
 type Decision = "accept" | "reject" | null;
@@ -97,6 +103,9 @@ export function RevalidationClient({
   candidateVersion,
   deltaFailRecall,
   existingDecision,
+  liveRunsComplete,
+  baselineIsLive,
+  candidateIsLive,
 }: Props) {
   const [decision, setDecision]    = useState<Decision>(null);
   const [note, setNote]            = useState("");
@@ -137,6 +146,32 @@ export function RevalidationClient({
   const sign = (v: number) => (v >= 0 ? "+" : "");
   const isImprovement = deltaFailRecall > 0.005;
   const isRegression  = deltaFailRecall < -0.005;
+
+  // Gate: Accept/Reject only enabled when we have a completed live candidate run.
+  // In baseline-live mode this is mandatory — no fixture fallback allowed.
+  const isLiveGated = baselineIsLive && !candidateIsLive;
+
+  // Live-gated: show info panel instead of form
+  if (isLiveGated) {
+    return (
+      <InstrumentPanel label="Analyst Decision">
+        <div className="space-y-3 py-2">
+          <div className="flex items-center gap-3 border border-jh-amber/50 bg-amber-50/20 px-3 py-2 font-mono text-[10px] text-jh-amber">
+            <div className="w-2 h-2 rounded-full bg-jh-led-amber shrink-0" />
+            <span>
+              <span className="font-semibold">LIVE MODE — </span>
+              Accept/Reject requires a completed Live Revalidation run.
+              Run Live Revalidation above to evaluate the candidate rubric with OpenAI.
+            </span>
+          </div>
+          <div className="font-mono text-[10px] text-jh-dim border border-jh-border-lt px-3 py-2">
+            No performance claim may be made until the candidate has been evaluated.
+            Candidate metrics will populate after the run completes.
+          </div>
+        </div>
+      </InstrumentPanel>
+    );
+  }
 
   return (
     <InstrumentPanel label="Analyst Decision">

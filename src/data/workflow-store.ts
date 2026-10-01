@@ -39,6 +39,9 @@ interface WorkflowState {
   // Track if the active version was superseded in this workflow run
   supersededVersion: string | null;
   revalidationDecision: RevalidationDecision | null;
+  // References to live evaluation runs (Milestone 4)
+  baselineRunId: string | null;
+  candidateRunId: string | null;
 }
 
 // ── Module-level singleton ────────────────────────────────────
@@ -49,6 +52,8 @@ let _state: WorkflowState = {
   candidateVersion: null,
   supersededVersion: null,
   revalidationDecision: null,
+  baselineRunId: null,
+  candidateRunId: null,
 };
 
 // ── ID generator ──────────────────────────────────────────────
@@ -92,6 +97,22 @@ export const WorkflowStore = {
   /** True if the baseline was superseded by an accepted candidate in this run */
   isBaselineSuperseded(version: string): boolean {
     return _state.supersededVersion === version;
+  },
+
+  getBaselineRunId(): string | null {
+    return _state.baselineRunId;
+  },
+
+  getCandidateRunId(): string | null {
+    return _state.candidateRunId;
+  },
+
+  setBaselineRunId(runId: string): void {
+    _state = { ..._state, baselineRunId: runId };
+  },
+
+  setCandidateRunId(runId: string): void {
+    _state = { ..._state, candidateRunId: runId };
   },
 
   // ── Mutate ────────────────────────────────────────────────
@@ -220,6 +241,8 @@ export const WorkflowStore = {
       candidateVersion: null,
       supersededVersion: null,
       revalidationDecision: null,
+      baselineRunId: null,
+      candidateRunId: null,
     };
   },
 } as const;

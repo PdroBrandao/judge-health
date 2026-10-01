@@ -252,3 +252,58 @@ export interface RevalidationDecision {
   rationale: string;
   decidedAt: string;
 }
+
+// ── Live evaluation run types ─────────────────────────────────
+
+export type EvaluationRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "partial_failure"
+  | "failed";
+
+/**
+ * A single judgment produced by the live evaluator (or fixture evaluator).
+ * groundTruth and humanReference are NEVER present here — the evaluator
+ * must remain blind to reference labels.
+ */
+export interface LiveJudgment {
+  caseId: string;
+  label: Label;
+  rationale: string;
+  model: string;
+  evaluatorVersion: string;
+  rubricVersion: string;
+  timestamp: string;
+  usageTokens?: number;
+}
+
+/** A failed evaluation attempt for a single case. */
+export interface RunError {
+  caseId: string;
+  error: string;
+  timestamp: string;
+}
+
+/** An immutable record of a complete (or partial) evaluation run. */
+export interface EvaluationRun {
+  runId: string;
+  type: "baseline" | "candidate";
+  /** fixture = pre-computed deterministic; live = real OpenAI call */
+  mode: "fixture" | "live";
+  evaluatorVersion: string;
+  rubricVersion: string;
+  taxonomyVersion: string;
+  model: string;
+  sampleIds: string[];
+  startedAt: string;
+  completedAt: string | null;
+  status: EvaluationRunStatus;
+  judgments: LiveJudgment[];
+  errors: RunError[];
+  usage: {
+    totalTokens: number;
+    promptTokens: number;
+    completionTokens: number;
+  };
+}

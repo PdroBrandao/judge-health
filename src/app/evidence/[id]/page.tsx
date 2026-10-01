@@ -8,8 +8,10 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { FixtureRepository } from "@/data/fixture-repository";
 import { WorkflowStore } from "@/data/workflow-store";
+import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { CaseDetail } from "@/components/CaseDetail";
+import type { CaseResult, Label } from "@/core/types";
 
 export default async function CaseDetailPage({
   params,
@@ -18,9 +20,38 @@ export default async function CaseDetailPage({
 }) {
   const { id } = await params;
   const activeVersion = FixtureRepository.getActiveEvaluatorVersion();
-  const detail = FixtureRepository.getCaseDetail(id, activeVersion.version);
+  let detail = FixtureRepository.getCaseDetail(id, activeVersion.version);
 
   if (!detail) notFound();
+
+  // ── Override evaluatorLabel / result with live judgment if available ──
+  const liveRun = RunStore.getBaselineRun();
+  const isLive  = liveRun?.mode === "live" &&
+    (liveRun.status === "completed" || liveRun.status === "partial_failure");
+
+  if (isLive && liveRun) {
+    // Use LiveJudgment directly (not converted) to preserve rationale
+    const liveJudgment = liveRun.judgments.find((j) => j.caseId === id);
+    if (liveJudgment) {
+      const liveLabel = liveJudgment.label as Label;
+      const result: CaseResult =
+        detail.groundTruth === "FAIL" && liveLabel === "FAIL" ? "TP"
+        : detail.groundTruth === "PASS" && liveLabel === "PASS" ? "TN"
+        : detail.groundTruth === "FAIL" && liveLabel === "PASS" ? "FN"
+        : "FP";
+      detail = {
+        ...detail,
+        evaluatorLabel: liveLabel,
+        evaluatorVersion: liveRun.evaluatorVersion,
+        result,
+        content: {
+          ...detail.content,
+          // Replace fixture rationale with the actual LLM rationale
+          evaluatorRationale: liveJudgment.rationale,
+        },
+      };
+    }
+  }
 
   const existingBlindReview = WorkflowStore.getBlindReview(id);
 

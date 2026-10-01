@@ -10,9 +10,27 @@
 // ============================================================
 import Link from "next/link";
 import { FixtureRepository } from "@/data/fixture-repository";
+import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { StatusLED } from "@/components/instrument/StatusLED";
-import type { EvidenceSummary, CaseResult } from "@/core/types";
+import type { EvidenceSummary, CaseResult, Label } from "@/core/types";
+
+// ── Helper: merge live judgments into fixture summaries ───────
+function applyLiveJudgments(
+  summaries: EvidenceSummary[],
+  liveMap: Map<string, Label>,
+): EvidenceSummary[] {
+  return summaries.map((s) => {
+    const liveLabel = liveMap.get(s.caseId);
+    if (!liveLabel) return s;
+    const result: CaseResult =
+      s.groundTruth === "FAIL" && liveLabel === "FAIL" ? "TP"
+      : s.groundTruth === "PASS" && liveLabel === "PASS" ? "TN"
+      : s.groundTruth === "FAIL" && liveLabel === "PASS" ? "FN"
+      : "FP";
+    return { ...s, evaluatorLabel: liveLabel, result };
+  });
+}
 
 // ── Result cell helpers ───────────────────────────────────────
 const RESULT_STYLES: Record<CaseResult, { label: string; color: string; led: "ok" | "error" | "warning" | "inactive" }> = {
@@ -38,9 +56,11 @@ function ResultBadge({ result }: { result: CaseResult }) {
 function EvidenceTable({
   rows,
   showRiskNote = false,
+  isLive = false,
 }: {
   rows: EvidenceSummary[];
   showRiskNote?: boolean;
+  isLive?: boolean;
 }) {
   const disagreements = rows.filter((r) => r.result === "FN" || r.result === "FP");
   const agreements    = rows.filter((r) => r.result === "TP" || r.result === "TN");
@@ -94,18 +114,22 @@ function EvidenceTable({
 
               {/* Evaluator */}
               <td className="px-2 py-2 text-center">
-                <span
-                  className={`${
-                    row.evaluatorLabel === "FAIL" ? "text-jh-red" : "text-jh-dim"
-                  }`}
-                >
-                  {row.evaluatorLabel}
-                </span>
+                {isLive ? (
+                  <span className={row.evaluatorLabel === "FAIL" ? "text-jh-red" : "text-jh-dim"}>
+                    {row.evaluatorLabel}
+                  </span>
+                ) : (
+                  <span className="text-jh-border-mid">—</span>
+                )}
               </td>
 
               {/* Result */}
               <td className="px-3 py-2">
-                <ResultBadge result={row.result} />
+                {isLive ? (
+                  <ResultBadge result={row.result} />
+                ) : (
+                  <span className="font-mono text-[10px] text-jh-border-mid">—</span>
+                )}
               </td>
 
               {/* Risk note (targeted only) */}
@@ -140,12 +164,25 @@ function EvidenceTable({
 
 // ── Page ─────────────────────────────────────────────────────
 export default function EvidencePage() {
-  const repSummaries = FixtureRepository.getEvidenceSummaries("representative");
-  const trgSummaries = FixtureRepository.getEvidenceSummaries("targeted_risk");
+  // ── Live run resolution ────────────────────────────────────
+  const liveRun = RunStore.getBaselineRun();
+  const isLive  = liveRun?.mode === "live" &&
+    (liveRun.status === "completed" || liveRun.status === "partial_failure");
 
-  const repFN = repSummaries.filter((r) => r.result === "FN").length;
-  const repFP = repSummaries.filter((r) => r.result === "FP").length;
-  const trgFN = trgSummaries.filter((r) => r.result === "FN").length;
+  let repSummaries = FixtureRepository.getEvidenceSummaries("representative");
+  let trgSummaries = FixtureRepository.getEvidenceSummaries("targeted_risk");
+
+  if (isLive && liveRun) {
+    const converted = liveJudgmentsToJudgments(liveRun.judgments);
+    const liveMap = new Map(converted.map((j) => [j.caseId, j.predictedLabel as Label]));
+    repSummaries = applyLiveJudgments(repSummaries, liveMap);
+    // Targeted/risk cases are also evaluated in live runs (diagnostic evidence only)
+    trgSummaries = applyLiveJudgments(trgSummaries, liveMap);
+  }
+
+  const repFN = isLive ? repSummaries.filter((r) => r.result === "FN").length : 0;
+  const repFP = isLive ? repSummaries.filter((r) => r.result === "FP").length : 0;
+  const trgFN = isLive ? trgSummaries.filter((r) => r.result === "FN").length : 0;
 
   return (
     <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
@@ -161,9 +198,16 @@ export default function EvidencePage() {
               All evaluated cases — representative and targeted/risk streams.
             </p>
           </div>
-          <span className="font-mono text-[10px] text-jh-dim border border-jh-border-lt px-2 py-1">
-            TEST ENVIRONMENT · FIXTURE DATA
-          </span>
+          {isLive && liveRun ? (
+            <span className="font-mono text-[10px] border border-jh-green/60 text-jh-green px-2 py-1 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-jh-led-green inline-block shrink-0" />
+              LIVE · {liveRun.model} · {liveRun.runId.slice(-8).toUpperCase()}
+            </span>
+          ) : (
+            <span className="font-mono text-[10px] text-jh-dim border border-jh-border-lt px-2 py-1">
+              TEST ENVIRONMENT · FIXTURE DATA
+            </span>
+          )}
         </div>
 
         {/* Notice */}
@@ -183,28 +227,32 @@ export default function EvidencePage() {
           {/* Stats bar */}
           <div className="flex items-center gap-6 px-3 py-2 border-b border-jh-border-lt bg-jh-bg/40 font-mono text-[10px]">
             <span className="text-jh-dim">
-              Distribution:{" "}
+              Reference:{" "}
               <span className="text-jh-text">
                 {repSummaries.filter((r) => r.groundTruth === "PASS").length} PASS /{" "}
                 {repSummaries.filter((r) => r.groundTruth === "FAIL").length} FAIL
               </span>
             </span>
-            <span className="text-jh-green">
-              ✓ {repSummaries.filter((r) => r.result === "TP" || r.result === "TN").length} correct
-            </span>
-            {repFN > 0 && (
-              <span className="text-jh-red font-semibold">
-                ● {repFN} missed FAIL (FN) ← investigation priority
+            {isLive ? (<>
+              <span className="text-jh-green">
+                ✓ {repSummaries.filter((r) => r.result === "TP" || r.result === "TN").length} correct
               </span>
-            )}
-            {repFP > 0 && (
-              <span className="text-jh-amber">
-                ▲ {repFP} false alarm (FP)
-              </span>
+              {repFN > 0 && (
+                <span className="text-jh-red font-semibold">
+                  ● {repFN} missed FAIL (FN) ← investigation priority
+                </span>
+              )}
+              {repFP > 0 && (
+                <span className="text-jh-amber">
+                  ▲ {repFP} false alarm (FP)
+                </span>
+              )}
+            </>) : (
+              <span className="text-jh-border-mid">Evaluator: — (run Live Baseline)</span>
             )}
           </div>
 
-          <EvidenceTable rows={repSummaries} />
+          <EvidenceTable rows={repSummaries} isLive={isLive} />
         </InstrumentPanel>
 
         {/* ── TARGETED/RISK SAMPLE ── */}
@@ -234,7 +282,7 @@ export default function EvidencePage() {
             )}
           </div>
 
-          <EvidenceTable rows={trgSummaries} showRiskNote />
+          <EvidenceTable rows={trgSummaries} showRiskNote isLive={isLive} />
         </InstrumentPanel>
 
         {/* Footer */}

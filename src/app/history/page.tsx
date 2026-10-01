@@ -206,10 +206,7 @@ function buildDynamicEntries(): LogEntry[] {
 
 export default function HistoryPage() {
   const activeVersion = FixtureRepository.getActiveEvaluatorVersion();
-  const dynamicEntries = buildDynamicEntries();
-  const fixtureEntries = buildLogEntries(activeVersion.version);
-  // Dynamic entries (this workflow run) appear at the top
-  const entries = [...dynamicEntries, ...fixtureEntries];
+  const entries = buildDynamicEntries(); // only real workflow actions
 
   return (
     <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
@@ -230,13 +227,25 @@ export default function HistoryPage() {
 
         {/* ── Log entries ───────────────────────────────────── */}
         <InstrumentPanel label={`Service Log — ${entries.length} entries · JH-001`} noPadding>
+          {entries.length === 0 && (
+            <div className="px-4 py-8 text-center space-y-2">
+              <div className="font-mono text-[11px] text-jh-dim">
+                No service events recorded yet.
+              </div>
+              <div className="font-mono text-[10px] text-jh-border-mid">
+                Events appear here as you run baselines, diagnose triggers, create interventions, and record decisions.
+              </div>
+            </div>
+          )}
           {/* Column header */}
+          {entries.length > 0 && (
           <div className="hidden md:grid grid-cols-[90px_1fr_110px_100px] gap-3 px-4 py-1.5 border-b border-jh-border-lt bg-jh-bg/60 text-[9px] font-mono text-jh-dim uppercase tracking-[0.12em]">
             <div>Date</div>
             <div>Event</div>
             <div>Version</div>
             <div>State</div>
           </div>
+          )}
 
           {/* Entries */}
           {entries.map((entry, i) => (

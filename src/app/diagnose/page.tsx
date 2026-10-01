@@ -8,6 +8,7 @@
 // Server component — passes fixture data to DiagnoseClient.
 // ============================================================
 import { FixtureRepository } from "@/data/fixture-repository";
+import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
 import { WorkflowStore } from "@/data/workflow-store";
 import { computeReliabilityProfile, pct } from "@/core/metrics";
 import { evaluateAllTriggers } from "@/core/triggers";
@@ -17,9 +18,15 @@ import { StatusLED } from "@/components/instrument/StatusLED";
 import { DiagnoseClient } from "@/components/DiagnoseClient";
 
 export default function DiagnosePage() {
-  // ── Load fixture state ────────────────────────────────────
+  // ── Resolve live vs fixture judgments ─────────────────────
+  const liveRun = RunStore.getBaselineRun();
+  const isLive  = liveRun?.mode === "live" &&
+    (liveRun.status === "completed" || liveRun.status === "partial_failure");
+
   const cases          = FixtureRepository.getCases();
-  const judgments      = FixtureRepository.getBaselineJudgments();
+  const judgments      = isLive
+    ? liveJudgmentsToJudgments(liveRun!.judgments)
+    : FixtureRepository.getBaselineJudgments();
   const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
   const activeRubric   = FixtureRepository.getActiveRubricVersion();
   const activeTaxonomy = FixtureRepository.getActiveTaxonomyVersion();
@@ -44,6 +51,36 @@ export default function DiagnosePage() {
       t.type === "metric" && (t as MetricTriggerConfig).metric === "fail_recall"
   );
   const gaugeThreshold = failRecallTrigger?.threshold ?? 0.7;
+
+  if (!isLive) {
+    return (
+      <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
+        <div className="max-w-[900px] mx-auto space-y-4">
+          <div className="border-b border-jh-border-lt pb-3">
+            <h2 className="font-sketch text-[1.6rem] font-bold leading-none tracking-wide text-jh-text">
+              Diagnosis Log
+            </h2>
+            <p className="font-mono text-[11px] text-jh-dim mt-1">
+              Classify the root cause of each triggered alert and decide on follow-up action.
+            </p>
+          </div>
+          <InstrumentPanel label="No Live Baseline" accent="warning">
+            <div className="flex items-start gap-3 py-2">
+              <StatusLED status="inactive" />
+              <div className="space-y-1">
+                <div className="font-mono text-[11px] text-jh-dim">
+                  Diagnosis requires a completed Live Baseline run.
+                </div>
+                <div className="font-mono text-[10px] text-jh-border-mid">
+                  Run Live Baseline from the Overview page first. Triggers are evaluated against live measurements only.
+                </div>
+              </div>
+            </div>
+          </InstrumentPanel>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-jh-bg p-3 lg:p-4">

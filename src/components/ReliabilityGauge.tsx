@@ -68,7 +68,7 @@ function tickLine(rI: number, rO: number, v: number) {
 }
 
 interface Props {
-  value: number;
+  value: number | null;  // null → empty state (no needle, shows —)
   threshold: number;
   metricLabel: string;
   fired: boolean;
@@ -82,7 +82,8 @@ const TICK_LABELS: [number, string][] = [
 ];
 
 export function ReliabilityGauge({ value, threshold, metricLabel, fired }: Props) {
-  const v  = Math.max(0, Math.min(1, value));
+  const isEmpty = value === null;
+  const v  = isEmpty ? 0 : Math.max(0, Math.min(1, value));
   const th = Math.max(0, Math.min(1, threshold));
 
   const stateColor    = fired ? "var(--jh-red)"  : "var(--jh-text)";
@@ -113,7 +114,7 @@ export function ReliabilityGauge({ value, threshold, metricLabel, fired }: Props
         />
 
         {/* ── Value progress arc ── */}
-        {v > 0.005 && (
+        {!isEmpty && v > 0.005 && (
           <path
             d={arcPath(R_VALUE, 0, v)}
             fill="none"
@@ -171,21 +172,21 @@ export function ReliabilityGauge({ value, threshold, metricLabel, fired }: Props
           LIMIT {(th * 100).toFixed(0)}%
         </text>
 
-        {/* ── Needle — points upward from pivot, stays in upper half ── */}
-        <polygon points={needlePoly(v)} fill={stateColor} />
+        {/* ── Needle — hidden in empty state ── */}
+        {!isEmpty && <polygon points={needlePoly(v)} fill={stateColor} />}
 
         {/* ── Pivot ── */}
-        <circle cx={CX} cy={CY} r="4.5" fill="var(--jh-text)" />
+        <circle cx={CX} cy={CY} r="4.5" fill={isEmpty ? "var(--jh-border-mid)" : "var(--jh-text)"} />
         <circle cx={CX} cy={CY} r="2"   fill="var(--jh-panel)" />
 
         {/* ── Readout — BELOW pivot, never obscured by needle ── */}
         <text
           x={CX} y={CY + 19}
-          fill={valueColor} fontSize="22"
+          fill={isEmpty ? "var(--jh-border-mid)" : valueColor} fontSize="22"
           fontFamily="var(--font-geist-mono), monospace"
           fontWeight="700" textAnchor="middle" letterSpacing="-0.02em"
         >
-          {(v * 100).toFixed(1)}%
+          {isEmpty ? "—" : `${(v * 100).toFixed(1)}%`}
         </text>
 
         <text
