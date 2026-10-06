@@ -10,6 +10,8 @@
 // ============================================================
 import { FixtureRepository } from "@/data/fixture-repository";
 import { WorkflowStore } from "@/data/workflow-store";
+import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
+import { computeReliabilityProfile, pct } from "@/core/metrics";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { StatusLED } from "@/components/instrument/StatusLED";
 import { CalibrationSeal } from "@/components/instrument/CalibrationSeal";
@@ -115,8 +117,13 @@ const STATE_COLOR: Record<string, string> = {
 
 // ── Build dynamic entries from WorkflowStore (multi-attempt) ──
 // Returns entries newest-first (reverse chronological).
-function buildDynamicEntries(): LogEntry[] {
-  const state = WorkflowStore.getState();
+// Accepts store snapshots so the function is unit-testable without
+// importing server actions.
+export function buildDynamicEntries(
+  state     = WorkflowStore.getState(),
+  getRun    = (id: string) => RunStore.getRun(id),
+  getCases  = () => FixtureRepository.getCases(),
+): LogEntry[] {
   const now   = new Date().toISOString().slice(0, 10);
   const dynamic: LogEntry[] = [];
 
@@ -214,12 +221,55 @@ function buildDynamicEntries(): LogEntry[] {
     });
   }
 
+  // ── Live baseline completed ────────────────────────────────
+  // Derived exclusively from the persisted RunStore run — never
+  // fixture fallback and never hardcoded metrics.
+  if (state.baselineRunId) {
+    const baselineRun = getRun(state.baselineRunId);
+    if (
+      baselineRun &&
+      (baselineRun.status === "completed" || baselineRun.status === "partial_failure") &&
+      baselineRun.mode === "live"
+    ) {
+      const cases     = getCases();
+      const judgments = liveJudgmentsToJudgments(baselineRun.judgments);
+      const profile   = computeReliabilityProfile(cases, judgments, baselineRun.evaluatorVersion);
+
+      const trgFAILCases = cases.filter(
+        (c) => c.sampleType === "targeted_risk" && c.groundTruth === "FAIL"
+      );
+      const trgDetected = trgFAILCases.filter((c) =>
+        baselineRun.judgments.find((j) => j.caseId === c.id && j.label === "FAIL")
+      ).length;
+
+      dynamic.push({
+        date:         (baselineRun.completedAt ?? baselineRun.startedAt).slice(0, 10),
+        event:        "Live baseline completed — baseline established",
+        version:      baselineRun.evaluatorVersion,
+        trigger:      "—",
+        action:       "Baseline established",
+        state:        "BASELINE ESTABLISHED",
+        stateVariant: "ok",
+        ledStatus:    "ok",
+        detail: [
+          `Run ID: ${baselineRun.runId}`,
+          `Model: ${baselineRun.model}`,
+          `Rubric: ${baselineRun.rubricVersion} · Taxonomy: ${baselineRun.taxonomyVersion}`,
+          `Evaluated: ${baselineRun.judgments.length}/${baselineRun.sampleIds.length}`,
+          `Representative n=${profile.sampleN} · OA ${pct(profile.overallAgreement)}`,
+          `FAIL Recall ${pct(profile.perClass.FAIL.recall)} · FP ${profile.confusionMatrix.FP} · FN ${profile.confusionMatrix.FN}`,
+          `Targeted/Risk FAIL: ${trgDetected}/${trgFAILCases.length} detected`,
+        ].join(" | "),
+      });
+    }
+  }
+
   return dynamic;
 }
 
 export default function HistoryPage() {
   const activeVersion = FixtureRepository.getActiveEvaluatorVersion();
-  const entries = buildDynamicEntries(); // only real workflow actions
+  const entries = buildDynamicEntries(); // derived from persisted WorkflowStore + RunStore
 
   return (
     <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
