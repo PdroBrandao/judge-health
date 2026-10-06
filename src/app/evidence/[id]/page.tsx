@@ -24,10 +24,10 @@ export default async function CaseDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ from?: string }>;
+  searchParams: Promise<{ from?: string; run?: string }>;
 }) {
   const { id }   = await params;
-  const { from } = await searchParams;
+  const { from, run: runParam } = await searchParams;
   const fromRevalidation = from === "revalidation";
 
   const activeVersion = FixtureRepository.getActiveEvaluatorVersion();
@@ -35,15 +35,36 @@ export default async function CaseDetailPage({
 
   if (!detail) notFound();
 
-  // ── Override evaluatorLabel / result with live baseline judgment if available ──
+  // ── Resolve which run to show in the main detail view ────────
+  // Priority: ?run=<runId> param → baseline run ID → baseline run (type-based fallback)
   const liveBaselineRunId = WorkflowStore.getBaselineRunId();
-  const liveBaselineRun   = liveBaselineRunId ? RunStore.getRun(liveBaselineRunId) : RunStore.getBaselineRun();
-  const isLive  = liveBaselineRun?.mode === "live" &&
-    (liveBaselineRun.status === "completed" || liveBaselineRun.status === "partial_failure");
+  let activeRun = runParam
+    ? RunStore.getRun(runParam)
+    : liveBaselineRunId
+    ? RunStore.getRun(liveBaselineRunId)
+    : RunStore.getBaselineRun();
 
-  if (isLive && liveBaselineRun) {
+  // Only use the run if it's a completed/partial_failure live run
+  if (activeRun && !(activeRun.mode === "live" &&
+    (activeRun.status === "completed" || activeRun.status === "partial_failure"))) {
+    activeRun = undefined;
+  }
+
+  const isLive = !!activeRun;
+  const activeRunProvenance = activeRun
+    ? {
+        runId:            activeRun.runId,
+        evaluatorVersion: activeRun.evaluatorVersion,
+        model:            activeRun.model,
+        type:             activeRun.type,
+        judgedCount:      activeRun.judgments.length,
+        totalCount:       activeRun.sampleIds.length,
+      }
+    : null;
+
+  if (isLive && activeRun) {
     // Use LiveJudgment directly (not converted) to preserve rationale
-    const liveJudgment = liveBaselineRun.judgments.find((j) => j.caseId === id);
+    const liveJudgment = activeRun.judgments.find((j) => j.caseId === id);
     if (liveJudgment) {
       const liveLabel = liveJudgment.label as Label;
       const result: CaseResult =
@@ -54,7 +75,7 @@ export default async function CaseDetailPage({
       detail = {
         ...detail,
         evaluatorLabel: liveLabel,
-        evaluatorVersion: liveBaselineRun.evaluatorVersion,
+        evaluatorVersion: activeRun.evaluatorVersion,
         result,
         content: {
           ...detail.content,
@@ -148,6 +169,39 @@ export default async function CaseDetailPage({
             </>
           )}
         </div>
+
+        {/* ── Run provenance strip ─────────────────────────────── */}
+        {activeRunProvenance && (
+          <div className="font-mono text-[10px] border border-jh-border-lt bg-jh-panel px-3 py-2 mb-3 flex flex-wrap gap-4 items-center">
+            <span className="text-jh-dim">
+              Source:{" "}
+              <span className="text-jh-text font-semibold">
+                {activeRunProvenance.type === "baseline" ? "Live Baseline" : "Candidate Revalidation"}
+              </span>
+            </span>
+            <span className="text-jh-dim">
+              Version: <span className="text-jh-text">{activeRunProvenance.evaluatorVersion}</span>
+            </span>
+            <span className="text-jh-dim">
+              Run ID: <span className="text-jh-text font-mono">{activeRunProvenance.runId}</span>
+            </span>
+            <span className="text-jh-dim">
+              Model: <span className="text-jh-text">{activeRunProvenance.model}</span>
+            </span>
+            <span className={activeRunProvenance.judgedCount < activeRunProvenance.totalCount ? "text-jh-amber" : "text-jh-dim"}>
+              Evaluated:{" "}
+              <span className={activeRunProvenance.judgedCount < activeRunProvenance.totalCount ? "font-semibold" : "text-jh-text"}>
+                {activeRunProvenance.judgedCount}/{activeRunProvenance.totalCount}
+              </span>
+            </span>
+            <Link
+              href={`/evidence?run=${encodeURIComponent(activeRunProvenance.runId)}`}
+              className="ml-auto font-mono text-[9px] text-jh-dim hover:text-jh-text border border-jh-border-lt px-2 py-0.5 hover:border-jh-border transition-colors"
+            >
+              ← All cases for this run
+            </Link>
+          </div>
+        )}
 
         {/* ── Revalidation evidence panel ───────────────────────── */}
         {revalidationContext && (
