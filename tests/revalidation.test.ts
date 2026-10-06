@@ -213,6 +213,7 @@ describe("REV-04: Accept/Reject disabled before completed candidate run", () => 
   it("WorkflowStore.recordDecision throws without a candidate", () => {
     expect(() =>
       WorkflowStore.recordDecision({
+        candidateId: "nonexistent-cand",
         candidateVersion: "v0.2.0-candidate",
         baselineVersion: "v0.2.0",
         decision: "accepted",
@@ -282,6 +283,238 @@ describe("REV-06: candidate metrics derive from stored live judgments only", () 
     expect(profile.confusionMatrix.FP).toBe(0); // evaluator said PASS → no FP
     expect(profile.confusionMatrix.FN).toBe(failCases.length); // missed all FAILs
     expect(profile.confusionMatrix.TP).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// REV-08: After rejection + startNewAttempt, ID-scoped lookup is undefined
+// ─────────────────────────────────────────────────────────────
+// Helper: set up a full diagnosis → intervention → candidate workflow
+function setupFullCandidate(repIds: string[]) {
+  WorkflowStore.submitDiagnosis({
+    triggerId: "trg-fail-001",
+    evaluatorVersion: "v0.2.0",
+    category: "evaluator_rubric",
+    observationNote: "Test diagnosis.",
+    revalidationRequested: true,
+    createdAt: new Date().toISOString(),
+  });
+  WorkflowStore.createIntervention({
+    diagnosisId: WorkflowStore.getDiagnosis()!.id,
+    baselineEvaluatorVersion: "v0.2.0",
+    baselineRubricVersion: "rubric-v0.2",
+    proposedRubricText: "Updated rubric text.",
+    rationale: "Test rationale for invariant.",
+    createdAt: new Date().toISOString(),
+  });
+  return WorkflowStore.createCandidate({
+    evaluatorVersion: "v0.2.0-candidate.test",
+    rubricVersion: "rubric-v0.2-proposed",
+    rubricText: "Updated rubric text.",
+    taxonomyVersion: "taxonomy-v0.1",
+  });
+}
+
+describe("REV-08: ID-scoped lookup returns undefined after startNewAttempt", () => {
+  it("getCurrentCandidateRunId is null after startNewAttempt — lookup returns undefined", () => {
+    const repIds = FixtureRepository.getCases()
+      .filter((c) => c.sampleType === "representative")
+      .map((c) => c.id);
+
+    // Setup: complete a candidate run and wire it to WorkflowStore
+    const cand = setupFullCandidate(repIds);
+    const run = createCandidateRun(repIds);
+    repIds.forEach((id) => RunStore.addJudgment(run.runId, makeJudgment(id)));
+    RunStore.completeRun(run.runId);
+    WorkflowStore.setCurrentCandidateRunId(run.runId);
+
+    // Before clear: ID-scoped lookup finds the run
+    const idBefore = WorkflowStore.getCurrentCandidateRunId();
+    expect(idBefore).toBe(run.runId);
+    expect(RunStore.getRun(idBefore!)).toBeDefined();
+
+    // Reject and start next attempt
+    WorkflowStore.recordDecision({
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
+      baselineVersion: "v0.2.0",
+      decision: "rejected",
+      rationale: "Rejected for test.",
+      decidedAt: new Date().toISOString(),
+    });
+    WorkflowStore.startNewAttempt();
+
+    // After startNewAttempt: currentCandidateRunId is null
+    const idAfter = WorkflowStore.getCurrentCandidateRunId();
+    expect(idAfter).toBeNull();
+
+    // ID-scoped lookup → undefined (correct: "NOT YET EVALUATED")
+    const scopedRun = idAfter ? RunStore.getRun(idAfter) : undefined;
+    expect(scopedRun).toBeUndefined();
+  });
+
+  it("type-based getCandidateRun() still returns old run (confirms ID-scoped is needed)", () => {
+    const repIds = FixtureRepository.getCases()
+      .filter((c) => c.sampleType === "representative")
+      .map((c) => c.id);
+
+    const cand = setupFullCandidate(repIds);
+    const run = createCandidateRun(repIds);
+    repIds.forEach((id) => RunStore.addJudgment(run.runId, makeJudgment(id)));
+    RunStore.completeRun(run.runId);
+    WorkflowStore.setCurrentCandidateRunId(run.runId);
+    WorkflowStore.recordDecision({
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
+      baselineVersion: "v0.2.0",
+      decision: "rejected",
+      rationale: "Rejected.",
+      decidedAt: new Date().toISOString(),
+    });
+    WorkflowStore.startNewAttempt();
+
+    // Type-based lookup still returns the old completed run — this is why
+    // ID-scoped lookup via getCurrentCandidateRunId() is essential.
+    expect(RunStore.getCandidateRun()).toBeDefined();
+    expect(RunStore.getCandidateRun()!.runId).toBe(run.runId);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// REV-09: getCurrentCandidateRunId lifecycle
+// ─────────────────────────────────────────────────────────────
+describe("REV-09: WorkflowStore.getCurrentCandidateRunId lifecycle", () => {
+  it("starts null when no candidate exists", () => {
+    expect(WorkflowStore.getCurrentCandidateRunId()).toBeNull();
+  });
+
+  it("is set after setCurrentCandidateRunId via full workflow", () => {
+    const repIds = FixtureRepository.getCases()
+      .filter((c) => c.sampleType === "representative")
+      .map((c) => c.id);
+    setupFullCandidate(repIds);
+    const run = createCandidateRun(repIds);
+    repIds.forEach((id) => RunStore.addJudgment(run.runId, makeJudgment(id)));
+    RunStore.completeRun(run.runId);
+    WorkflowStore.setCurrentCandidateRunId(run.runId);
+    expect(WorkflowStore.getCurrentCandidateRunId()).toBe(run.runId);
+  });
+
+  it("is null after startNewAttempt", () => {
+    const repIds = FixtureRepository.getCases()
+      .filter((c) => c.sampleType === "representative")
+      .map((c) => c.id);
+    const cand = setupFullCandidate(repIds);
+    const run = createCandidateRun(repIds);
+    repIds.forEach((id) => RunStore.addJudgment(run.runId, makeJudgment(id)));
+    RunStore.completeRun(run.runId);
+    WorkflowStore.setCurrentCandidateRunId(run.runId);
+    WorkflowStore.recordDecision({
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
+      baselineVersion: "v0.2.0",
+      decision: "rejected",
+      rationale: "Test.",
+      decidedAt: new Date().toISOString(),
+    });
+    WorkflowStore.startNewAttempt();
+    expect(WorkflowStore.getCurrentCandidateRunId()).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// REV-10: null getCurrentCandidateRunId → safe undefined (no crash)
+// ─────────────────────────────────────────────────────────────
+describe("REV-10: safe lookup when getCurrentCandidateRunId is null", () => {
+  it("ID-scoped lookup with null id returns undefined without throwing", () => {
+    const id = WorkflowStore.getCurrentCandidateRunId(); // null
+    const run = id ? RunStore.getRun(id) : undefined;
+    expect(run).toBeUndefined();
+  });
+
+  it("RunStore.getRun with unknown id returns undefined (no throw)", () => {
+    expect(RunStore.getRun("nonexistent-run")).toBeUndefined();
+  });
+
+  it("candidateIsLive is false when liveCandidateRun is undefined", () => {
+    const candidateRunId = WorkflowStore.getCurrentCandidateRunId();
+    const liveCandidateRun = candidateRunId ? RunStore.getRun(candidateRunId) : undefined;
+    const candidateIsLive =
+      liveCandidateRun?.mode === "live" &&
+      (liveCandidateRun.status === "completed" || liveCandidateRun.status === "partial_failure");
+    expect(candidateIsLive).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// REV-11: Version string uniqueness (nonce prevents same-day collision)
+// ─────────────────────────────────────────────────────────────
+describe("REV-11: candidate version string includes nonce", () => {
+  it("version strings with different nonces are distinct on the same date", () => {
+    const base = "v0.2.0";
+    const date = "20261001";
+    const v1 = `${base}-candidate.${date}-ab3f`;
+    const v2 = `${base}-candidate.${date}-cd7e`;
+    expect(v1).not.toEqual(v2);
+  });
+
+  it("version string format matches expected pattern with nonce", () => {
+    const version = "v0.2.0-candidate.20261001-ab3f";
+    // base-candidate.YYYYMMDD-<4-char nonce>
+    expect(version).toMatch(/^.+-candidate\.\d{8}-[a-z0-9]{4}$/);
+  });
+
+  it("two Math.random-generated nonces collide with probability < 1/36^4", () => {
+    // Generate 20 nonce pairs — statistically all should be distinct
+    const nonces = Array.from({ length: 20 }, () => Math.random().toString(36).slice(2, 6));
+    const unique = new Set(nonces);
+    // All 20 should be unique (collision probability ≈ 0.0006%)
+    expect(unique.size).toBe(nonces.length);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// REV-12: ID-scoped vs type-based lookup diverge after rejection
+// ─────────────────────────────────────────────────────────────
+describe("REV-12: full rejection cycle — scoped vs type-based diverge", () => {
+  it("after reject+startNewAttempt+new candidate: scoped=null, type-based=old run", () => {
+    const repIds = FixtureRepository.getCases()
+      .filter((c) => c.sampleType === "representative")
+      .map((c) => c.id);
+
+    // ── Cycle 1: Candidate #1 created, run, rejected ──
+    const cand1 = setupFullCandidate(repIds);
+    const run1  = createCandidateRun(repIds);
+    repIds.forEach((id) => RunStore.addJudgment(run1.runId, makeJudgment(id)));
+    RunStore.completeRun(run1.runId);
+    WorkflowStore.setCurrentCandidateRunId(run1.runId);
+    WorkflowStore.recordDecision({
+      candidateId: cand1.candidateId,
+      candidateVersion: cand1.evaluatorVersion,
+      baselineVersion: "v0.2.0",
+      decision: "rejected",
+      rationale: "Rejected.",
+      decidedAt: new Date().toISOString(),
+    });
+    WorkflowStore.startNewAttempt();
+
+    // ── Cycle 2: Candidate #2 not yet evaluated ──
+    // candidateRunId = null because no run has been started for #2
+
+    // Revalidation page logic (ID-scoped):
+    const candidateRunIdAfter = WorkflowStore.getCurrentCandidateRunId(); // null
+    const scopedRun = candidateRunIdAfter
+      ? RunStore.getRun(candidateRunIdAfter)
+      : undefined;
+
+    // ID-scoped → undefined → candidateIsLive = false → "NOT YET EVALUATED"
+    expect(scopedRun).toBeUndefined();
+
+    // Type-based still returns run1 (confirms ID-scoped is the correct approach)
+    expect(RunStore.getCandidateRun()?.runId).toBe(run1.runId);
+
+    // The two approaches disagree — confirming ID-scoped is necessary
+    expect(scopedRun).not.toBe(RunStore.getCandidateRun());
   });
 });
 

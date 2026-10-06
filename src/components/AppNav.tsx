@@ -28,7 +28,8 @@ const NAV_LINKS = [
   { href: "/diagnose",      label: "DIAGNOSE" },
   { href: "/intervention",  label: "INTERVENTION" },
   { href: "/revalidation",  label: "REVALIDATION" },
-  { href: "/history",       label: "HISTORY" },
+  { href: "/history",              label: "HISTORY" },
+  { href: "/calibration-report",  label: "REPORT" },
 ] as const;
 
 export async function AppNav() {

@@ -113,20 +113,25 @@ const STATE_COLOR: Record<string, string> = {
   dim:     "text-jh-dim",
 };
 
-// ── Build dynamic entries from WorkflowStore ──────────────────
+// ── Build dynamic entries from WorkflowStore (multi-attempt) ──
+// Returns entries newest-first (reverse chronological).
 function buildDynamicEntries(): LogEntry[] {
   const state = WorkflowStore.getState();
-  const now = new Date().toISOString().slice(0, 10);
+  const now   = new Date().toISOString().slice(0, 10);
   const dynamic: LogEntry[] = [];
 
-  // Revalidation decision
-  if (state.revalidationDecision) {
-    const d = state.revalidationDecision;
+  // ── All decisions (one per rejected/accepted candidate) ────
+  for (const d of [...state.decisions].reverse()) {
     const accepted = d.decision === "accepted";
+    // Find matching candidate to get attempt number
+    const cand = state.candidates.find((c) => c.candidateId === d.candidateId);
+    const attemptLabel = cand ? ` (attempt #${cand.attemptNumber})` : "";
     dynamic.push({
       date:         d.decidedAt.slice(0, 10),
-      event:        accepted ? "Revalidation accepted — candidate promoted" : "Revalidation rejected — baseline retained",
-      version:      accepted ? d.candidateVersion : d.candidateVersion,
+      event:        accepted
+        ? `Revalidation accepted — candidate promoted${attemptLabel}`
+        : `Revalidation rejected — baseline retained${attemptLabel}`,
+      version:      d.candidateVersion,
       trigger:      "manual_decision",
       action:       accepted ? "Candidate promoted to active" : "Candidate rejected",
       state:        accepted ? "VALIDATED" : "REJECTED",
@@ -137,40 +142,48 @@ function buildDynamicEntries(): LogEntry[] {
     });
   }
 
-  // Candidate created
-  if (state.candidateVersion) {
-    const v = state.candidateVersion;
+  // ── All candidates ─────────────────────────────────────────
+  for (const c of [...state.candidates].reverse()) {
+    // Find the intervention this candidate came from
+    const iv = state.interventions.find((i) => i.id === c.interventionId);
     dynamic.push({
-      date:         v.createdAt.slice(0, 10),
-      event:        "Candidate created via intervention",
-      version:      v.version,
-      trigger:      state.intervention?.diagnosisId ? "intervention_workflow" : "manual",
-      action:       "Revalidation initiated",
-      state:        "UNDER REVIEW",
-      stateVariant: "warning",
-      ledStatus:    "warning",
-      seal:         "INVESTIGATING",
-      detail:       v.changeDescription ? v.changeDescription.slice(0, 200) : undefined,
+      date:         c.createdAt.slice(0, 10),
+      event:        `Candidate created — attempt #${c.attemptNumber}`,
+      version:      c.evaluatorVersion,
+      trigger:      "intervention_workflow",
+      action:       c.status === "accepted"
+        ? "Candidate promoted"
+        : c.status === "rejected"
+        ? "Candidate rejected"
+        : "Revalidation initiated",
+      state:        c.status === "accepted"
+        ? "VALIDATED"
+        : c.status === "rejected"
+        ? "REJECTED"
+        : "UNDER REVIEW",
+      stateVariant: c.status === "accepted" ? "ok" : c.status === "rejected" ? "error" : "warning",
+      ledStatus:    c.status === "accepted" ? "ok" : c.status === "rejected" ? "error" : "warning",
+      seal:         c.status === "accepted" ? "VALIDATED" : c.status === "rejected" ? "REVALIDATION REQUIRED" : "INVESTIGATING",
+      detail:       iv?.rationale ? iv.rationale.slice(0, 200) : undefined,
     });
   }
 
-  // Intervention
-  if (state.intervention) {
-    const iv = state.intervention;
+  // ── All interventions ──────────────────────────────────────
+  for (const iv of [...state.interventions].reverse()) {
     dynamic.push({
       date:         iv.createdAt.slice(0, 10),
-      event:        "Intervention created — proposed rubric changes",
+      event:        `Intervention #${iv.attemptNumber} created — proposed rubric changes`,
       version:      iv.baselineEvaluatorVersion,
       trigger:      "diagnosis_revalidation_request",
       action:       "Rubric change proposed",
-      state:        "UNDER REVIEW",
+      state:        iv.status === "candidate_created" ? "CANDIDATE CREATED" : "UNDER REVIEW",
       stateVariant: "warning",
       ledStatus:    "warning",
       detail:       iv.rationale.slice(0, 200),
     });
   }
 
-  // Diagnosis
+  // ── Diagnosis ──────────────────────────────────────────────
   if (state.diagnosis) {
     const diag = state.diagnosis;
     dynamic.push({
@@ -186,7 +199,7 @@ function buildDynamicEntries(): LogEntry[] {
     });
   }
 
-  // Blind reviews (aggregate)
+  // ── Blind reviews (aggregate) ──────────────────────────────
   if (state.blindReviews.length > 0) {
     dynamic.push({
       date:         now,

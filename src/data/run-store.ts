@@ -8,6 +8,9 @@
 //   - addJudgment / addError / setStatus throw if run is completed.
 //   - A new run never overwrites a previous one (append-only).
 //
+// Durability: write-through JSON file via persistence.ts.
+// On module init, hydrates from experiment-data/run-store.json.
+// Every mutation flushes atomically to disk before returning.
 // The last completed baseline/candidate run is the authoritative
 // source for revalidation metrics.
 // ============================================================
@@ -17,9 +20,10 @@ import type {
   LiveJudgment,
   RunError,
 } from "@/core/types";
+import { loadRuns, saveRuns, clearPersistedState } from "@/data/persistence";
 
-// ── Module-level singleton ────────────────────────────────────
-let _runs: EvaluationRun[] = [];
+// ── Module-level singleton — hydrate from disk on startup ─────
+let _runs: EvaluationRun[] = loadRuns() ?? [];
 
 // ── ID generator ──────────────────────────────────────────────
 function uid(): string {
@@ -93,6 +97,7 @@ export const RunStore = {
       usage: { totalTokens: 0, promptTokens: 0, completionTokens: 0 },
     };
     _runs = [..._runs, run];
+    saveRuns(_runs);
     return run;
   },
 
@@ -101,6 +106,7 @@ export const RunStore = {
     _runs = _runs.map((r) =>
       r.runId === runId ? { ...r, status: "running" as const } : r
     );
+    saveRuns(_runs);
   },
 
   /** Append a successful judgment to a run. Throws if run is sealed. */
@@ -122,6 +128,7 @@ export const RunStore = {
         },
       };
     });
+    saveRuns(_runs);
   },
 
   /** Append a failed case error to a run. Throws if run is sealed. */
@@ -134,12 +141,16 @@ export const RunStore = {
     _runs = _runs.map((r) =>
       r.runId !== runId ? r : { ...r, errors: [...r.errors, error] }
     );
+    saveRuns(_runs);
   },
 
-  /** Replace an error with a successful judgment (retry). */
+  /** Replace an error with a successful judgment (retry). Throws if run is sealed. */
   resolveError(runId: string, caseId: string, judgment: LiveJudgment): void {
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
+    if (run.status === "completed") {
+      throw new Error(`RunStore: run ${runId} is sealed (completed). Cannot resolve error.`);
+    }
     _runs = _runs.map((r) => {
       if (r.runId !== runId) return r;
       return {
@@ -155,6 +166,7 @@ export const RunStore = {
         },
       };
     });
+    saveRuns(_runs);
   },
 
   /**
@@ -164,6 +176,8 @@ export const RunStore = {
   completeRun(runId: string): EvaluationRun {
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
+    // Idempotent: if already sealed, return the existing run without re-mutating.
+    if (run.status === "completed" || run.status === "partial_failure") return run;
     const finalStatus: EvaluationRunStatus =
       run.errors.length === 0 ? "completed" : "partial_failure";
     const completed: EvaluationRun = {
@@ -172,6 +186,7 @@ export const RunStore = {
       completedAt: new Date().toISOString(),
     };
     _runs = _runs.map((r) => (r.runId === runId ? completed : r));
+    saveRuns(_runs);
     return completed;
   },
 
@@ -189,13 +204,15 @@ export const RunStore = {
         ],
       };
     });
+    saveRuns(_runs);
   },
 
   // ── Test utility ──────────────────────────────────────────
 
-  /** Reset all runs. Test isolation only. */
+  /** Reset all runs. Test isolation and explicit Reset Experiment action only. */
   reset(): void {
     _runs = [];
+    clearPersistedState();
   },
 } as const;
 

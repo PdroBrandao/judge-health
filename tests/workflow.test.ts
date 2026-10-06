@@ -18,7 +18,8 @@
 //
 // All tests are deterministic and pure — no server actions called.
 // ============================================================
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 import { WorkflowStore } from "../src/data/workflow-store";
 
 // ── Test data helpers ─────────────────────────────────────────
@@ -45,14 +46,12 @@ function diagnosisData() {
   };
 }
 
-function candidateVersion(version = "v0.2.0-candidate.20261001") {
+function candidateVersion() {
   return {
-    version,
-    status: "candidate" as const,
-    createdAt: new Date().toISOString(),
+    evaluatorVersion: "v0.2.0-candidate.20261001",
     rubricVersion: "rubric-v0.2-proposed",
+    rubricText: "Clarified FAIL boundary for ambiguous cases.",
     taxonomyVersion: "taxonomy-v0.1",
-    changeDescription: "Clarified FAIL boundary for ambiguous cases.",
   };
 }
 
@@ -130,7 +129,7 @@ describe("INV-03: createIntervention requires an existing diagnosis", () => {
     });
     expect(intervention.diagnosisId).toBe(diag.id);
     expect(intervention.status).toBe("draft");
-    expect(WorkflowStore.getIntervention()).not.toBeNull();
+    expect(WorkflowStore.getCurrentIntervention()).not.toBeNull();
   });
 });
 
@@ -162,9 +161,9 @@ describe("INV-04: createCandidate requires an existing intervention", () => {
       createdAt: new Date().toISOString(),
     });
     const candidate = WorkflowStore.createCandidate(candidateVersion());
-    expect(candidate.version).toBe("v0.2.0-candidate.20261001");
-    expect(candidate.status).toBe("candidate");
-    expect(WorkflowStore.getCandidateVersion()).not.toBeNull();
+    expect(candidate.evaluatorVersion).toBe("v0.2.0-candidate.20261001");
+    expect(candidate.status).toBe("under_review");
+    expect(WorkflowStore.getCurrentCandidate()).not.toBeNull();
   });
 });
 
@@ -182,31 +181,33 @@ describe("INV-05/06: accept/reject transitions candidate status", () => {
       rationale: "Root cause found.",
       createdAt: new Date().toISOString(),
     });
-    WorkflowStore.createCandidate(candidateVersion());
+    return WorkflowStore.createCandidate(candidateVersion());
   }
 
-  it("accept transitions candidate to 'active'", () => {
-    buildWorkflow();
+  it("accept transitions candidate to 'accepted'", () => {
+    const cand = buildWorkflow();
     WorkflowStore.recordDecision({
-      candidateVersion: "v0.2.0-candidate.20261001",
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
       baselineVersion: "v0.2.0",
       decision: "accepted",
       rationale: "Metrics improved on primary safety indicator.",
       decidedAt: new Date().toISOString(),
     });
-    expect(WorkflowStore.getCandidateVersion()!.status).toBe("active");
+    expect(WorkflowStore.getCurrentCandidate()!.status).toBe("accepted");
   });
 
   it("reject transitions candidate to 'rejected'", () => {
-    buildWorkflow();
+    const cand = buildWorkflow();
     WorkflowStore.recordDecision({
-      candidateVersion: "v0.2.0-candidate.20261001",
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
       baselineVersion: "v0.2.0",
       decision: "rejected",
       rationale: "Metrics regressed on PASS recall — too many false alarms.",
       decidedAt: new Date().toISOString(),
     });
-    expect(WorkflowStore.getCandidateVersion()!.status).toBe("rejected");
+    expect(WorkflowStore.getCurrentCandidate()!.status).toBe("rejected");
   });
 });
 
@@ -224,9 +225,10 @@ describe("INV-07/08: accept marks baseline superseded; reject does not", () => {
       rationale: "Root cause found.",
       createdAt: new Date().toISOString(),
     });
-    WorkflowStore.createCandidate(candidateVersion());
+    const cand = WorkflowStore.createCandidate(candidateVersion());
     WorkflowStore.recordDecision({
-      candidateVersion: "v0.2.0-candidate.20261001",
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
       baselineVersion: "v0.2.0",
       decision,
       rationale: "Decision rationale here.",
@@ -294,9 +296,10 @@ describe("INV-10: diagnosis status transitions through workflow", () => {
       rationale: "Root cause found.",
       createdAt: new Date().toISOString(),
     });
-    WorkflowStore.createCandidate(candidateVersion());
+    const cand = WorkflowStore.createCandidate(candidateVersion());
     WorkflowStore.recordDecision({
-      candidateVersion: "v0.2.0-candidate.20261001",
+      candidateId: cand.candidateId,
+      candidateVersion: cand.evaluatorVersion,
       baselineVersion: "v0.2.0",
       decision: "accepted",
       rationale: "Metrics improved on all key indicators.",
@@ -313,6 +316,7 @@ describe("INV-11: recordDecision requires an active candidate", () => {
   it("throws when no candidate exists", () => {
     expect(() =>
       WorkflowStore.recordDecision({
+        candidateId: "nonexistent-cand-id",
         candidateVersion: "v0.2.0-candidate.20261001",
         baselineVersion: "v0.2.0",
         decision: "accepted",
@@ -343,9 +347,12 @@ describe("INV-12: reset() clears all state", () => {
     WorkflowStore.reset();
 
     expect(WorkflowStore.getDiagnosis()).toBeNull();
-    expect(WorkflowStore.getIntervention()).toBeNull();
-    expect(WorkflowStore.getCandidateVersion()).toBeNull();
-    expect(WorkflowStore.getRevalidationDecision()).toBeNull();
+    expect(WorkflowStore.getCurrentIntervention()).toBeNull();
+    expect(WorkflowStore.getCurrentCandidate()).toBeNull();
+    expect(WorkflowStore.getCurrentDecision()).toBeNull();
+    expect(WorkflowStore.getAllInterventions()).toHaveLength(0);
+    expect(WorkflowStore.getAllCandidates()).toHaveLength(0);
+    expect(WorkflowStore.getAllDecisions()).toHaveLength(0);
     expect(WorkflowStore.getAllBlindReviews()).toHaveLength(0);
     expect(WorkflowStore.getBlindReview("case-001")).toBeUndefined();
     expect(WorkflowStore.isBaselineSuperseded("v0.2.0")).toBe(false);
@@ -366,7 +373,7 @@ describe("Intervention status transitions", () => {
       rationale: "Root cause found.",
       createdAt: new Date().toISOString(),
     });
-    expect(WorkflowStore.getIntervention()!.status).toBe("draft");
+    expect(WorkflowStore.getCurrentIntervention()!.status).toBe("draft");
   });
 
   it("transitions to 'candidate_created' when candidate is created", () => {
@@ -380,7 +387,7 @@ describe("Intervention status transitions", () => {
       createdAt: new Date().toISOString(),
     });
     WorkflowStore.createCandidate(candidateVersion());
-    expect(WorkflowStore.getIntervention()!.status).toBe("candidate_created");
+    expect(WorkflowStore.getCurrentIntervention()!.status).toBe("candidate_created");
   });
 });
 

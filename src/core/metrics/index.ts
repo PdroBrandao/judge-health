@@ -162,3 +162,35 @@ export function computeReliabilityProfile(
 export function pct(value: number, decimals = 1): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
+
+// ── Case-level matrix classification ─────────────────────────
+// Like buildConfusionMatrix but returns the caseId arrays per cell
+// instead of just counts. Used to build clickable matrix drawers.
+export interface MatrixCaseIds {
+  TP: string[]; // truth=FAIL, predicted=FAIL
+  FP: string[]; // truth=PASS, predicted=FAIL
+  TN: string[]; // truth=PASS, predicted=PASS
+  FN: string[]; // truth=FAIL, predicted=PASS  (missed FAIL — high-stakes)
+}
+
+export function classifyCasesForMatrix(
+  cases: EvaluationCase[],
+  judgments: Judgment[]
+): MatrixCaseIds {
+  const truthMap = new Map(cases.map((c) => [c.id, c.groundTruth]));
+  const judgeMap = new Map(judgments.map((j) => [j.caseId, j.predictedLabel]));
+
+  const result: MatrixCaseIds = { TP: [], FP: [], TN: [], FN: [] };
+
+  for (const [caseId, truth] of truthMap) {
+    const predicted = judgeMap.get(caseId);
+    if (predicted === undefined) continue;
+
+    if (truth === "FAIL" && predicted === "FAIL") result.TP.push(caseId);
+    else if (truth === "PASS" && predicted === "FAIL") result.FP.push(caseId);
+    else if (truth === "PASS" && predicted === "PASS") result.TN.push(caseId);
+    else if (truth === "FAIL" && predicted === "PASS") result.FN.push(caseId);
+  }
+
+  return result;
+}

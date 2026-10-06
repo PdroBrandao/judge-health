@@ -47,15 +47,13 @@ export async function actionCreateRun(
     sampleIds: params.sampleIds,
   });
 
-  // Store rubric text on the run for audit
-  // (We attach it via a side-channel in store metadata — store it in
-  //  the run object by extending the run with an augmented field.)
-  // We persist rubric text in WorkflowStore rather than RunStore
-  // to keep RunStore types clean.
+  // Wire the run ID into the appropriate WorkflowStore slot.
   if (params.type === "baseline") {
     WorkflowStore.setBaselineRunId(run.runId);
   } else {
-    WorkflowStore.setCandidateRunId(run.runId);
+    // Candidate run: attach to the current CandidateRecord so the
+    // revalidation page can do an ID-scoped lookup instead of "latest by type".
+    WorkflowStore.setCurrentCandidateRunId(run.runId);
   }
 
   RunStore.startRun(run.runId);
@@ -195,3 +193,68 @@ export async function actionGetRun(
 
 // ── Helper: convert live judgments for metrics engine ─────────
 export { liveJudgmentsToJudgments };
+
+// ── 6. Smoke test a single case (no RunStore side effects) ────
+// Used to verify the evaluator can handle a case before a full run.
+export interface SmokeTestResult {
+  ok: boolean;
+  caseId: string;
+  label?: "PASS" | "FAIL";
+  rationale?: string;
+  error?: string;
+  durationMs: number;
+}
+
+export async function actionSmokeTest(params: {
+  caseId: string;
+  rubricText: string;
+  evaluatorVersion: string;
+  rubricVersion: string;
+}): Promise<SmokeTestResult> {
+  const { caseId, rubricText, evaluatorVersion, rubricVersion } = params;
+  const t0 = Date.now();
+
+  const content = FixtureRepository.getCaseContent(caseId);
+  if (!content) {
+    return { ok: false, caseId, error: `No case content for ${caseId}.`, durationMs: Date.now() - t0 };
+  }
+
+  const evaluatorInput = {
+    caseId,
+    input: content.input,
+    systemOutput: content.systemOutput,
+    rubricText,
+    evaluatorVersion,
+    rubricVersion,
+  };
+
+  try {
+    const evaluator = new OpenAIEvaluator();
+    const result = await evaluator.judgeCaseWithUsage(evaluatorInput);
+    return {
+      ok: true,
+      caseId,
+      label: result.label,
+      rationale: result.rationale,
+      durationMs: Date.now() - t0,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      caseId,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - t0,
+    };
+  }
+}
+
+// ── 7. Reset all run state (development / experiment reset) ───
+export async function actionResetRuns(): Promise<void> {
+  RunStore.reset();
+  WorkflowStore.reset();
+  revalidatePath("/");
+  revalidatePath("/evidence");
+  revalidatePath("/diagnose");
+  revalidatePath("/revalidation");
+  revalidatePath("/history");
+}

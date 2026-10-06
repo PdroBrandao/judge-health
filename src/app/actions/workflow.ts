@@ -9,10 +9,18 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { WorkflowStore } from "@/data/workflow-store";
+import { RunStore } from "@/data/run-store";
 import type {
   Label,
   DiagnosisCategory,
 } from "@/core/types";
+
+function revalidateAll() {
+  revalidatePath("/");
+  revalidatePath("/intervention");
+  revalidatePath("/revalidation");
+  revalidatePath("/history");
+}
 
 // ── Submit Blind Human Review ─────────────────────────────────
 export async function actionSubmitBlindReview(data: {
@@ -28,7 +36,6 @@ export async function actionSubmitBlindReview(data: {
     rationale: data.rationale,
     submittedAt: new Date().toISOString(),
   });
-  // Re-render the case detail page so existing review shows immediately
   revalidatePath(`/evidence/${data.caseId}`);
   return { ok: true };
 }
@@ -56,6 +63,8 @@ export async function actionSubmitDiagnosis(data: {
 }
 
 // ── Create Intervention ───────────────────────────────────────
+// Appends a new intervention to the append-only array.
+// Throws if there is already an active (non-submitted) intervention.
 export async function actionCreateIntervention(data: {
   diagnosisId: string;
   baselineEvaluatorVersion: string;
@@ -63,7 +72,6 @@ export async function actionCreateIntervention(data: {
   proposedRubricText: string;
   rationale: string;
 }): Promise<{ ok: true }> {
-  // WorkflowStore enforces that diagnosis exists
   WorkflowStore.createIntervention({
     diagnosisId: data.diagnosisId,
     baselineEvaluatorVersion: data.baselineEvaluatorVersion,
@@ -72,52 +80,82 @@ export async function actionCreateIntervention(data: {
     rationale: data.rationale,
     createdAt: new Date().toISOString(),
   });
-  revalidatePath("/intervention");
-  revalidatePath("/revalidation");
-  revalidatePath("/history");
+  revalidateAll();
   return { ok: true };
 }
 
 // ── Create Candidate ──────────────────────────────────────────
-// Creates the dynamic candidate from the intervention.
-// Redirects to revalidation after creation.
+// Creates the candidate record from the current intervention.
+// The version string includes a nonce to prevent same-day collision.
+// Redirects to /revalidation after creation.
 export async function actionCreateCandidate(data: {
-  version: string;
+  evaluatorVersion: string;
   rubricVersion: string;
+  rubricText: string;
   taxonomyVersion: string;
-  changeDescription: string;
 }): Promise<never> {
-  // WorkflowStore enforces that intervention exists
+  // Idempotency guard: if a non-decided candidate is already active, redirect.
+  const existing = WorkflowStore.getCurrentCandidate();
+  if (existing && existing.status === "under_review") {
+    redirect("/revalidation");
+  }
+
   WorkflowStore.createCandidate({
-    version: data.version,
-    status: "candidate",
-    createdAt: new Date().toISOString(),
+    evaluatorVersion: data.evaluatorVersion,
     rubricVersion: data.rubricVersion,
+    rubricText: data.rubricText,
     taxonomyVersion: data.taxonomyVersion,
-    changeDescription: data.changeDescription,
   });
-  revalidatePath("/revalidation");
-  revalidatePath("/history");
+  revalidateAll();
   redirect("/revalidation");
 }
 
 // ── Record Revalidation Decision ──────────────────────────────
 export async function actionRecordDecision(data: {
+  candidateId: string;
   candidateVersion: string;
   baselineVersion: string;
   decision: "accepted" | "rejected";
   rationale: string;
 }): Promise<{ ok: true }> {
-  // WorkflowStore enforces that candidate exists
   WorkflowStore.recordDecision({
+    candidateId: data.candidateId,
     candidateVersion: data.candidateVersion,
     baselineVersion: data.baselineVersion,
     decision: data.decision,
     rationale: data.rationale,
     decidedAt: new Date().toISOString(),
   });
+  revalidateAll();
+  return { ok: true };
+}
+
+// ── Start New Attempt ─────────────────────────────────────────
+// Clears the current-attempt pointers WITHOUT deleting any history.
+// All previous interventions, candidates, runs, and decisions
+// are preserved in their append-only arrays.
+// The diagnosis remains; only the current-attempt pointers reset.
+// Redirects to /intervention to begin the next attempt.
+export async function actionStartNewAttempt(): Promise<void> {
+  WorkflowStore.startNewAttempt();
+  revalidateAll();
+  redirect("/intervention");
+}
+
+// ── Reset Experiment (DESTRUCTIVE — development only) ─────────
+// Wipes all in-memory and persisted experiment state.
+// Deletes experiment-data/workflow-state.json and run-store.json.
+// Must only be called from the Settings page via an explicit user action.
+// NEVER auto-triggered on reload, recompile, or hot-reload.
+export async function actionResetExperiment(): Promise<void> {
+  WorkflowStore.reset();
+  RunStore.reset();
+  revalidatePath("/");
+  revalidatePath("/evidence");
+  revalidatePath("/diagnose");
+  revalidatePath("/intervention");
   revalidatePath("/revalidation");
   revalidatePath("/history");
-  revalidatePath("/");
-  return { ok: true };
+  revalidatePath("/calibration-report");
+  redirect("/");
 }

@@ -1,64 +1,84 @@
 // ============================================================
-// WorkflowStore — in-memory state for the Judge Health workflow
+// WorkflowStore — multi-attempt, append-only workflow state
 //
-// Persistence: module-level singleton. Survives page navigations
-// and browser refreshes (same Node.js process). Resets on server
-// restart (npm run dev). This is intentional for local demo use.
+// Persistence: write-through JSON file via persistence.ts.
+// On module init, hydrates from disk (experiment-data/workflow-state.json).
+// Every mutation flushes to disk atomically before returning.
+// Resets only on explicit actionResetExperiment() — never on hot-reload.
 //
-// Thin abstraction: the WorkflowStore interface can be dropped
-// behind a real repository (database) later without changing callers.
+// Multi-attempt model:
+//   ONE Diagnosis per workflow session.
+//   N Interventions per Diagnosis (one per attempt).
+//   N Candidates (one per intervention, 1:1).
+//   N Decisions (one per candidate, 0..1).
 //
-// State machine:
+// Every append-only collection is never overwritten:
+//   interventions[], candidates[], decisions[]
+//
+// Current-attempt pointers (currentInterventionId, currentCandidateId)
+// are nulled when starting a new attempt; they do NOT delete history.
+//
+// State machine per attempt:
 //   INITIAL → Diagnosis → Intervention → Candidate
 //           → Revalidation → Decision (accept/reject)
-//
-// Invariants enforced here:
-//   - createIntervention() requires an existing diagnosis
-//   - createCandidate() requires an existing intervention
-//   - submitBlindReview() never touches HumanReferenceRecord fixtures
-//   - recordDecision("accepted") promotes candidate to ACTIVE
-//     and marks baseline as SUPERSEDED in store (fixture unchanged)
-//   - recordDecision("rejected") marks candidate as REJECTED;
-//     baseline version remains ACTIVE
+//   On REJECT: currentInterventionId=null, currentCandidateId=null
+//              history preserved → new attempt starts
+//   On ACCEPT: candidate promoted, workflow complete
 // ============================================================
 import type {
   BlindHumanReview,
+  CandidateRecord,
   DiagnosisRecord,
   InterventionRecord,
   RevalidationDecision,
-  EvaluatorVersion,
 } from "@/core/types";
+import {
+  loadWorkflowState,
+  saveWorkflowState,
+  clearPersistedState,
+} from "@/data/persistence";
 
 // ── State shape ───────────────────────────────────────────────
 interface WorkflowState {
   blindReviews: BlindHumanReview[];
   diagnosis: DiagnosisRecord | null;
-  intervention: InterventionRecord | null;
-  // Dynamically created by the intervention step
-  candidateVersion: EvaluatorVersion | null;
-  // Track if the active version was superseded in this workflow run
-  supersededVersion: string | null;
-  revalidationDecision: RevalidationDecision | null;
-  // References to live evaluation runs (Milestone 4)
+  // Append-only attempt history (never cleared, only appended)
+  interventions: InterventionRecord[];
+  candidates: CandidateRecord[];
+  decisions: RevalidationDecision[];
+  // Current-attempt pointers (null = no active attempt / ready for new)
+  currentInterventionId: string | null;
+  currentCandidateId: string | null;
+  // Baseline run (set once when live baseline completes)
   baselineRunId: string | null;
-  candidateRunId: string | null;
+  // Version string of the superseded baseline (when a candidate is accepted)
+  supersededVersion: string | null;
 }
 
-// ── Module-level singleton ────────────────────────────────────
-let _state: WorkflowState = {
+// ── Initial state shape ───────────────────────────────────────
+const INITIAL_STATE: WorkflowState = {
   blindReviews: [],
   diagnosis: null,
-  intervention: null,
-  candidateVersion: null,
-  supersededVersion: null,
-  revalidationDecision: null,
+  interventions: [],
+  candidates: [],
+  decisions: [],
+  currentInterventionId: null,
+  currentCandidateId: null,
   baselineRunId: null,
-  candidateRunId: null,
+  supersededVersion: null,
 };
 
-// ── ID generator ──────────────────────────────────────────────
+// ── Module-level singleton — hydrate from disk on startup ─────
+// loadWorkflowState() returns null in test env or if no file exists,
+// in which case we start from INITIAL_STATE.
+let _state: WorkflowState = (loadWorkflowState() as WorkflowState | null) ?? { ...INITIAL_STATE };
+
+// ── ID generators ─────────────────────────────────────────────
 function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function candidateUid(): string {
+  return `cand-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 // ── Store API ─────────────────────────────────────────────────
@@ -82,46 +102,80 @@ export const WorkflowStore = {
     return _state.diagnosis;
   },
 
-  getIntervention(): InterventionRecord | null {
-    return _state.intervention;
+  // ── Intervention reads ────────────────────────────────────
+
+  /** All interventions across all attempts, in insertion order. */
+  getAllInterventions(): InterventionRecord[] {
+    return [..._state.interventions];
   },
 
-  getCandidateVersion(): EvaluatorVersion | null {
-    return _state.candidateVersion;
+  /** The intervention for the current attempt, or null if none active. */
+  getCurrentIntervention(): InterventionRecord | null {
+    if (!_state.currentInterventionId) return null;
+    return _state.interventions.find((i) => i.id === _state.currentInterventionId) ?? null;
   },
 
-  getRevalidationDecision(): RevalidationDecision | null {
-    return _state.revalidationDecision;
+  // ── Candidate reads ───────────────────────────────────────
+
+  /** All candidates across all attempts, in insertion order. */
+  getAllCandidates(): CandidateRecord[] {
+    return [..._state.candidates];
   },
 
-  /** True if the baseline was superseded by an accepted candidate in this run */
-  isBaselineSuperseded(version: string): boolean {
-    return _state.supersededVersion === version;
+  /** The candidate for the current attempt, or null if none active. */
+  getCurrentCandidate(): CandidateRecord | null {
+    if (!_state.currentCandidateId) return null;
+    return _state.candidates.find((c) => c.candidateId === _state.currentCandidateId) ?? null;
   },
+
+  // ── Decision reads ────────────────────────────────────────
+
+  /** All decisions across all attempts, in insertion order. */
+  getAllDecisions(): RevalidationDecision[] {
+    return [..._state.decisions];
+  },
+
+  /**
+   * The decision for the current candidate, or null if none recorded.
+   * Looks up by currentCandidateId.
+   */
+  getCurrentDecision(): RevalidationDecision | null {
+    if (!_state.currentCandidateId) return null;
+    return (
+      _state.decisions.find((d) => d.candidateId === _state.currentCandidateId) ?? null
+    );
+  },
+
+  // ── Run ID reads ──────────────────────────────────────────
 
   getBaselineRunId(): string | null {
     return _state.baselineRunId;
   },
 
-  getCandidateRunId(): string | null {
-    return _state.candidateRunId;
+  /** Run ID for the current candidate's revalidation run, or null. */
+  getCurrentCandidateRunId(): string | null {
+    return _state.candidates.find(
+      (c) => c.candidateId === _state.currentCandidateId
+    )?.revalidationRunId ?? null;
   },
+
+  /** True if the baseline was superseded by an accepted candidate. */
+  isBaselineSuperseded(version: string): boolean {
+    return _state.supersededVersion === version;
+  },
+
+  // ── Baseline run ──────────────────────────────────────────
 
   setBaselineRunId(runId: string): void {
     _state = { ..._state, baselineRunId: runId };
-  },
-
-  setCandidateRunId(runId: string): void {
-    _state = { ..._state, candidateRunId: runId };
+    saveWorkflowState(_state);
   },
 
   // ── Mutate ────────────────────────────────────────────────
 
   /**
    * Submit a blind human review for a single case.
-   * DOES NOT modify HumanReferenceRecord fixture — these are
-   * always stored and displayed as separate records.
-   * Multiple submissions for the same case are allowed (overwrites).
+   * Multiple submissions for the same case overwrite previous.
    */
   submitBlindReview(data: Omit<BlindHumanReview, "id">): BlindHumanReview {
     const review: BlindHumanReview = { id: uid(), ...data };
@@ -132,117 +186,173 @@ export const WorkflowStore = {
         review,
       ],
     };
+    saveWorkflowState(_state);
     return review;
   },
 
   /**
    * Record the trigger-level diagnosis.
-   * Only one active diagnosis at a time (replaces previous).
-   * status starts as "open".
+   * Only one diagnosis per session. Replaces previous if re-submitted.
    */
   submitDiagnosis(data: Omit<DiagnosisRecord, "id" | "status">): DiagnosisRecord {
-    const record: DiagnosisRecord = {
-      id: uid(),
-      ...data,
-      status: "open",
-    };
+    const record: DiagnosisRecord = { id: uid(), ...data, status: "open" };
     _state = { ..._state, diagnosis: record };
+    saveWorkflowState(_state);
     return record;
   },
 
   /**
-   * Create an intervention from an existing diagnosis.
-   * Throws if no diagnosis exists — invariant enforced here.
+   * Create a new intervention for the current attempt.
+   * Appends to interventions[] — never overwrites.
+   * Requires an existing diagnosis and no currently-active intervention.
    */
-  createIntervention(data: Omit<InterventionRecord, "id" | "status">): InterventionRecord {
+  createIntervention(
+    data: Omit<InterventionRecord, "id" | "status" | "attemptNumber">
+  ): InterventionRecord {
     if (!_state.diagnosis) {
+      throw new Error("WorkflowStore: cannot create intervention without an active diagnosis.");
+    }
+    if (_state.currentInterventionId) {
       throw new Error(
-        "WorkflowStore: cannot create intervention without an active diagnosis."
+        "WorkflowStore: an intervention is already active. " +
+        "Call startNewAttempt() before creating another."
       );
     }
+    const attemptNumber = _state.interventions.length + 1;
     const record: InterventionRecord = {
       id: uid(),
       ...data,
+      attemptNumber,
       status: "draft",
     };
     _state = {
       ..._state,
-      intervention: record,
+      interventions: [..._state.interventions, record],
+      currentInterventionId: record.id,
       diagnosis: _state.diagnosis
         ? { ..._state.diagnosis, status: "intervention_created" }
         : null,
     };
+    saveWorkflowState(_state);
     return record;
   },
 
   /**
-   * Create a candidate evaluator version from an intervention.
-   * Throws if no intervention exists — invariant enforced here.
-   * The intervention status transitions to "candidate_created".
+   * Create a candidate from the current intervention.
+   * Appends to candidates[] — never overwrites.
+   * Requires an existing current intervention.
    */
-  createCandidate(version: EvaluatorVersion): EvaluatorVersion {
-    if (!_state.intervention) {
+  createCandidate(
+    data: Omit<CandidateRecord, "candidateId" | "interventionId" | "attemptNumber" | "status" | "createdAt" | "revalidationRunId" | "decisionId">
+  ): CandidateRecord {
+    const intervention = _state.interventions.find(
+      (i) => i.id === _state.currentInterventionId
+    );
+    if (!intervention) {
+      throw new Error("WorkflowStore: cannot create candidate without an active intervention.");
+    }
+    if (_state.currentCandidateId) {
       throw new Error(
-        "WorkflowStore: cannot create candidate without an active intervention."
+        "WorkflowStore: a candidate is already active. " +
+        "Call startNewAttempt() before creating another."
       );
+    }
+    const candidate: CandidateRecord = {
+      ...data,
+      candidateId: candidateUid(),
+      interventionId: intervention.id,
+      attemptNumber: intervention.attemptNumber,
+      status: "under_review",
+      createdAt: new Date().toISOString(),
+      revalidationRunId: null,
+      decisionId: null,
+    };
+    _state = {
+      ..._state,
+      candidates: [..._state.candidates, candidate],
+      currentCandidateId: candidate.candidateId,
+      interventions: _state.interventions.map((i) =>
+        i.id === intervention.id ? { ...i, status: "candidate_created" as const } : i
+      ),
+    };
+    saveWorkflowState(_state);
+    return candidate;
+  },
+
+  /**
+   * Set the revalidation run ID on the current candidate.
+   * Called when a live candidate run is created in RunStore.
+   */
+  setCurrentCandidateRunId(runId: string): void {
+    if (!_state.currentCandidateId) {
+      throw new Error("WorkflowStore: no active candidate to attach run to.");
     }
     _state = {
       ..._state,
-      candidateVersion: version,
-      intervention: { ..._state.intervention, status: "candidate_created" },
+      candidates: _state.candidates.map((c) =>
+        c.candidateId === _state.currentCandidateId
+          ? { ...c, revalidationRunId: runId }
+          : c
+      ),
     };
-    return version;
+    saveWorkflowState(_state);
   },
 
   /**
    * Record the accept/reject decision for the current candidate.
-   * ACCEPT: candidate becomes ACTIVE; previous active becomes SUPERSEDED.
-   * REJECT: candidate becomes REJECTED; baseline stays ACTIVE.
-   * Fixture evaluator-versions.ts is NEVER mutated — changes are in-store.
+   * Appends to decisions[] — never overwrites.
+   * ACCEPT: candidate status → "accepted"; baseline superseded.
+   * REJECT: candidate status → "rejected"; baseline stays active.
    */
   recordDecision(data: Omit<RevalidationDecision, "id">): RevalidationDecision {
-    if (!_state.candidateVersion) {
-      throw new Error(
-        "WorkflowStore: cannot record decision without an active candidate."
-      );
+    if (!_state.currentCandidateId) {
+      throw new Error("WorkflowStore: cannot record decision without an active candidate.");
     }
     const decision: RevalidationDecision = { id: uid(), ...data };
-
-    const newCandidateStatus =
-      data.decision === "accepted" ? "active" : "rejected";
+    const accepted = data.decision === "accepted";
 
     _state = {
       ..._state,
-      candidateVersion: {
-        ..._state.candidateVersion,
-        status: newCandidateStatus,
-      },
-      supersededVersion:
-        data.decision === "accepted" ? data.baselineVersion : _state.supersededVersion,
-      revalidationDecision: decision,
+      decisions: [..._state.decisions, decision],
+      candidates: _state.candidates.map((c) =>
+        c.candidateId === _state.currentCandidateId
+          ? { ...c, status: accepted ? "accepted" : "rejected", decisionId: decision.id }
+          : c
+      ),
+      supersededVersion: accepted ? data.baselineVersion : _state.supersededVersion,
       diagnosis: _state.diagnosis
         ? { ..._state.diagnosis, status: "resolved" }
         : null,
     };
+    saveWorkflowState(_state);
     return decision;
+  },
+
+  /**
+   * Start a new attempt after rejection.
+   * Clears the current-attempt pointers WITHOUT deleting any history.
+   * interventions[], candidates[], decisions[] are preserved.
+   * Diagnosis status is reopened so a new intervention can be created.
+   *
+   * Precondition: must only be called after a "rejected" decision.
+   */
+  startNewAttempt(): void {
+    _state = {
+      ..._state,
+      currentInterventionId: null,
+      currentCandidateId: null,
+      diagnosis: _state.diagnosis
+        ? { ..._state.diagnosis, status: "open" as const }
+        : null,
+    };
+    saveWorkflowState(_state);
   },
 
   // ── Test utility ──────────────────────────────────────────
 
-  /**
-   * Reset to initial state. Used in tests only.
-   * Must be called between test cases to ensure isolation.
-   */
+  /** Reset to initial state. Tests and explicit Reset Experiment action only. */
   reset(): void {
-    _state = {
-      blindReviews: [],
-      diagnosis: null,
-      intervention: null,
-      candidateVersion: null,
-      supersededVersion: null,
-      revalidationDecision: null,
-      baselineRunId: null,
-      candidateRunId: null,
-    };
+    _state = { ...INITIAL_STATE };
+    clearPersistedState();
   },
 } as const;

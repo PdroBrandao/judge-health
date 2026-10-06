@@ -143,6 +143,11 @@ export function LiveRunPanel({
         errors++;
         setErrorCount(errors);
         setLastError(result.error);
+        // Track failed caseId locally so the Retry button appears immediately,
+        // without waiting for server revalidation to re-hydrate existingRun.errors.
+        setLocalErrorIds((prev) =>
+          prev.includes(caseId) ? prev : [...prev, caseId]
+        );
       }
     }
 
@@ -293,7 +298,7 @@ export function LiveRunPanel({
           {[
             { label: "Model",      value: model },
             { label: "Run type",   value: type === "baseline" ? "Live Baseline" : "Live Revalidation" },
-            { label: "Cases",      value: `${total} cases (rep + targeted/risk)` },
+            { label: "Cases",      value: `${total} (60 rep · 10 targeted/risk)` },
             { label: "Requests",   value: `~${total} API calls` },
             { label: "Evaluator",  value: evaluatorVersion },
             { label: "Rubric",     value: rubricVersion },

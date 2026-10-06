@@ -6,21 +6,43 @@
 // The analyst edits the proposed rubric and writes a rationale.
 // On submit, calls actionCreateIntervention() (persists intervention)
 // then actionCreateCandidate() which redirects to /revalidation.
+//
+// Multi-attempt: this component is keyed by attemptNumber from the
+// server so React fully remounts it on each new attempt, ensuring
+// useState hooks reinitialize with the baseline rubric text.
 // ============================================================
 import { useState, useTransition } from "react";
-import { actionCreateIntervention, actionCreateCandidate } from "@/app/actions/workflow";
-import type { DiagnosisRecord, InterventionRecord } from "@/core/types";
+import {
+  actionCreateIntervention,
+  actionCreateCandidate,
+  actionStartNewAttempt,
+} from "@/app/actions/workflow";
+import type { DiagnosisRecord, InterventionRecord, RevalidationDecision } from "@/core/types";
 
 interface Props {
   diagnosis: DiagnosisRecord;
   baselineEvaluatorVersion: string;
   baselineRubricVersion: string;
+  baselineTaxonomyVersion: string;
   currentRubricText: string;
   existingIntervention: InterventionRecord | null;
+  revalidationDecision: RevalidationDecision | null;
+  /** Number of previously rejected attempts (0 = this is the first). */
+  previousAttemptCount: number;
 }
 
 // ── Read-only view once intervention is created ───────────────
-function InterventionReadOnly({ intervention }: { intervention: InterventionRecord }) {
+function InterventionReadOnly({
+  intervention,
+  wasRejected,
+  previousAttemptCount,
+}: {
+  intervention: InterventionRecord;
+  wasRejected: boolean;
+  previousAttemptCount: number;
+}) {
+  const [isPending, startTransition] = useTransition();
+
   const statusColors = {
     draft: "text-jh-amber",
     candidate_created: "text-jh-green",
@@ -30,8 +52,16 @@ function InterventionReadOnly({ intervention }: { intervention: InterventionReco
     <div className="space-y-4">
       <div className="flex items-center gap-3 border border-jh-green/40 bg-green-50/20 px-3 py-2 font-mono text-[10px] text-jh-green">
         <div className="w-2 h-2 rounded-full bg-jh-led-green shrink-0" />
-        Intervention recorded — {new Date(intervention.createdAt).toLocaleString()}
+        Intervention #{intervention.attemptNumber} recorded — {new Date(intervention.createdAt).toLocaleString()}
       </div>
+
+      {previousAttemptCount > 0 && (
+        <div className="border border-jh-amber/30 bg-amber-50/10 px-3 py-2 font-mono text-[10px] text-jh-amber">
+          This is attempt #{intervention.attemptNumber}. {previousAttemptCount} previous
+          {previousAttemptCount === 1 ? " candidate was" : " candidates were"} rejected.
+          Full history is available in the History page.
+        </div>
+      )}
 
       <div className="border border-jh-border-lt bg-jh-bg/40 p-3 space-y-2 font-mono text-[10px]">
         <div className="flex gap-3">
@@ -41,6 +71,10 @@ function InterventionReadOnly({ intervention }: { intervention: InterventionReco
         <div className="flex gap-3">
           <span className="text-jh-dim w-32 shrink-0">Baseline Rubric</span>
           <span className="text-jh-text">{intervention.baselineRubricVersion}</span>
+        </div>
+        <div className="flex gap-3">
+          <span className="text-jh-dim w-32 shrink-0">Attempt #</span>
+          <span className="text-jh-text">{intervention.attemptNumber}</span>
         </div>
         <div className="flex gap-3">
           <span className="text-jh-dim w-32 shrink-0">Status</span>
@@ -65,7 +99,7 @@ function InterventionReadOnly({ intervention }: { intervention: InterventionReco
           Intervention saved as draft. Navigate to Revalidation to continue.
         </div>
       )}
-      {intervention.status === "candidate_created" && (
+      {intervention.status === "candidate_created" && !wasRejected && (
         <div className="border border-jh-green/40 bg-green-50/20 px-3 py-2 font-mono text-[10px] text-jh-green flex items-center justify-between gap-3">
           <span>Candidate created successfully.</span>
           <a
@@ -74,6 +108,30 @@ function InterventionReadOnly({ intervention }: { intervention: InterventionReco
           >
             View Revalidation →
           </a>
+        </div>
+      )}
+
+      {/* ── Start new attempt after rejection ─────────────── */}
+      {wasRejected && (
+        <div className="border border-jh-amber/50 bg-amber-50/10 px-3 py-3 space-y-2">
+          <div className="font-mono text-[10px] text-jh-amber font-semibold">
+            CANDIDATE REJECTED — Start next attempt
+          </div>
+          <div className="font-mono text-[10px] text-jh-dim leading-relaxed">
+            The diagnosis is preserved. All previous attempts are stored in the History page.
+            Creating a new intervention will start a fresh attempt with the baseline rubric.
+          </div>
+          <button
+            onClick={() =>
+              startTransition(async () => {
+                await actionStartNewAttempt();
+              })
+            }
+            disabled={isPending}
+            className="font-mono text-[11px] border border-jh-amber/60 text-jh-amber px-4 py-2 hover:bg-amber-50/30 transition-colors disabled:opacity-40"
+          >
+            {isPending ? "Preparing…" : "New Intervention →"}
+          </button>
         </div>
       )}
     </div>
@@ -85,16 +143,28 @@ export function InterventionClient({
   diagnosis,
   baselineEvaluatorVersion,
   baselineRubricVersion,
+  baselineTaxonomyVersion,
   currentRubricText,
   existingIntervention,
+  revalidationDecision,
+  previousAttemptCount,
 }: Props) {
+  // RC-3: Because the server component passes key={attemptNumber}, React will
+  // fully remount this component when a new attempt starts, so useState here
+  // always initializes from the fresh baseline rubric, never from a previous attempt.
   const [proposedRubric, setProposedRubric] = useState(currentRubricText);
   const [rationale, setRationale]           = useState("");
   const [isPending, startTransition]        = useTransition();
 
   // If intervention already exists, show read-only view
   if (existingIntervention) {
-    return <InterventionReadOnly intervention={existingIntervention} />;
+    return (
+      <InterventionReadOnly
+        intervention={existingIntervention}
+        wasRejected={revalidationDecision?.decision === "rejected"}
+        previousAttemptCount={previousAttemptCount}
+      />
+    );
   }
 
   const canSubmit = rationale.trim().length >= 10;
@@ -104,7 +174,7 @@ export function InterventionClient({
     if (!canSubmit || isPending) return;
 
     startTransition(async () => {
-      // 1. Persist the intervention
+      // 1. Persist the intervention (creates InterventionRecord, sets currentInterventionId)
       await actionCreateIntervention({
         diagnosisId: diagnosis.id,
         baselineEvaluatorVersion,
@@ -113,20 +183,31 @@ export function InterventionClient({
         rationale,
       });
 
-      // 2. Create the candidate version from the intervention.
-      //    actionCreateCandidate() calls redirect("/revalidation") — no return.
+      // 2. Create the candidate from the intervention (sets currentCandidateId).
+      //    Version string includes a 4-char alphanumeric nonce (C-2) to prevent
+      //    collision when two candidates are created on the same calendar day.
+      //    actionCreateCandidate() ends with redirect("/revalidation").
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const nonce     = Math.random().toString(36).slice(2, 6);
       await actionCreateCandidate({
-        version: `${baselineEvaluatorVersion}-candidate.${timestamp}`,
+        evaluatorVersion: `${baselineEvaluatorVersion}-candidate.${timestamp}-${nonce}`,
         rubricVersion: `${baselineRubricVersion}-proposed`,
-        taxonomyVersion: "v1.0.0", // taxonomy unchanged in this intervention
-        changeDescription: rationale.slice(0, 120),
+        rubricText: proposedRubric,
+        taxonomyVersion: baselineTaxonomyVersion,
       });
     });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+
+      {previousAttemptCount > 0 && (
+        <div className="border border-jh-amber/30 bg-amber-50/10 px-3 py-2 font-mono text-[10px] text-jh-amber">
+          Attempt #{previousAttemptCount + 1} — {previousAttemptCount} previous
+          {previousAttemptCount === 1 ? " candidate was" : " candidates were"} rejected.
+          The rubric below is reset to the baseline — refine your approach.
+        </div>
+      )}
 
       {/* Diagnosis context */}
       <div className="border border-jh-border-lt bg-jh-bg/40 px-3 py-2 font-mono text-[10px]">

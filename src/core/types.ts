@@ -232,9 +232,12 @@ export interface DiagnosisRecord {
 // ── Workflow: Intervention Record ─────────────────────────────
 // Created from a diagnosis. Never mutates the active evaluator.
 // Creates a new candidate when submitted.
+// Multiple interventions per diagnosis (one per attempt) are stored
+// in an append-only array — never overwrite previous ones.
 export interface InterventionRecord {
   id: string;
   diagnosisId: string;
+  attemptNumber: number;        // 1-based; unique per diagnosis
   baselineEvaluatorVersion: string;
   baselineRubricVersion: string;
   proposedRubricText: string;
@@ -243,9 +246,27 @@ export interface InterventionRecord {
   createdAt: string;
 }
 
+// ── Workflow: Candidate Record ────────────────────────────────
+// One candidate per intervention. Owns the link to its revalidation
+// run and decision so that multi-attempt history is navigable by ID.
+export interface CandidateRecord {
+  candidateId: string;            // unique, e.g. "cand-lq3z7-ab3f"
+  interventionId: string;
+  attemptNumber: number;          // mirrors intervention.attemptNumber
+  evaluatorVersion: string;       // "v0.2.0-candidate.20261002-ab3f"
+  rubricVersion: string;
+  rubricText: string;             // full proposed rubric text (for audit)
+  taxonomyVersion: string;
+  status: "under_review" | "accepted" | "rejected";
+  createdAt: string;
+  revalidationRunId: string | null;  // set when live run is created
+  decisionId: string | null;         // set when decision is recorded
+}
+
 // ── Workflow: Revalidation Decision ──────────────────────────
 export interface RevalidationDecision {
   id: string;
+  candidateId: string;        // links to CandidateRecord.candidateId
   candidateVersion: string;
   baselineVersion: string;
   decision: "accepted" | "rejected";

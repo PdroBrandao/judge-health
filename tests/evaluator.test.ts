@@ -334,6 +334,7 @@ describe("INV-L08: accept/reject requires completed revalidation", () => {
   it("WorkflowStore.recordDecision throws if no candidate version", () => {
     expect(() =>
       WorkflowStore.recordDecision({
+        candidateId: "nonexistent-cand",
         candidateVersion: "v0.2.0-candidate",
         baselineVersion: "v0.2.0",
         decision: "accepted",

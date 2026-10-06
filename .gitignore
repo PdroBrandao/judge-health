@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# experiment data — durable local persistence (not committed to VCS)
+experiment-data/

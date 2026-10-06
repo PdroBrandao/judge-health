@@ -13,6 +13,8 @@ import { actionRecordDecision } from "@/app/actions/workflow";
 import type { RevalidationDecision } from "@/core/types";
 
 interface Props {
+  /** CandidateRecord.candidateId — required to link decision to the right candidate. */
+  candidateId: string;
   baselineVersion: string;
   candidateVersion: string;
   deltaFailRecall: number;
@@ -88,8 +90,16 @@ function DecisionResult({ decision }: { decision: RevalidationDecision }) {
           </div>
         )}
         {!accepted && (
-          <div className="border border-jh-red/40 bg-red-50/20 px-3 py-2 font-mono text-[10px] text-jh-red">
-            Candidate rejected. {decision.baselineVersion} remains active. Create a new intervention to try again.
+          <div className="border border-jh-red/40 bg-red-50/20 px-3 py-2 font-mono text-[10px] text-jh-red flex items-center justify-between gap-4">
+            <span>
+              Candidate rejected. {decision.baselineVersion} remains active.
+            </span>
+            <a
+              href="/intervention"
+              className="font-mono text-[11px] border border-jh-red/60 text-jh-red px-3 py-1.5 hover:bg-red-50/30 transition-colors whitespace-nowrap shrink-0"
+            >
+              Create New Intervention →
+            </a>
           </div>
         )}
       </div>
@@ -99,6 +109,7 @@ function DecisionResult({ decision }: { decision: RevalidationDecision }) {
 
 // ── Main component ─────────────────────────────────────────────
 export function RevalidationClient({
+  candidateId,
   baselineVersion,
   candidateVersion,
   deltaFailRecall,
@@ -125,6 +136,7 @@ export function RevalidationClient({
 
     startTransition(async () => {
       await actionRecordDecision({
+        candidateId,
         candidateVersion,
         baselineVersion,
         decision: decision === "accept" ? "accepted" : "rejected",
@@ -133,6 +145,7 @@ export function RevalidationClient({
       // Optimistically show result
       setLocalDecision({
         id: "optimistic",
+        candidateId,
         candidateVersion,
         baselineVersion,
         decision: decision === "accept" ? "accepted" : "rejected",
