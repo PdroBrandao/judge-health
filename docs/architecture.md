@@ -152,7 +152,7 @@ experiment-data/
   run-store.json         # EvaluationRun[] array
 ```
 
-Both files are gitignored. The live experiment state lives only on the researcher's machine.
+Both files are gitignored. The live experiment state lives only on the researcher's machine. Accepted calibration runs can be documented externally as immutable research records (such as `docs/calibration-run-0001.md`) without requiring raw persisted experiment state to be committed to source control.
 
 ### FixtureRepository (`src/data/fixture-repository.ts`)
 

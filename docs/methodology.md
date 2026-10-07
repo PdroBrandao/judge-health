@@ -43,9 +43,9 @@ The automated evaluator's output is the starting point for measurement. It is ne
 
 A **representative human reference sample** is drawn to reflect the true population distribution of cases. This is the only sample valid for population-level reliability estimates.
 
-**Inter-rater reliability (IRR) must be established** as a pre-condition before the human reference is treated as stable. Unresolved IRR means unresolved ground truth — and unresolved ground truth makes the reliability profile meaningless.
+**For production-grade validation, IRR should be established before the human reference is treated as a stable reference standard.** IRR is assessed independently (no group discussion before rating). Typical instruments: Cohen's κ, percentage agreement per class. A reference session with IRR below a configured floor must be flagged before metrics are computed.
 
-IRR is assessed independently (no group discussion before rating). Typical instruments: Cohen's κ, percentage agreement per class. A reference session with IRR below a configured floor must be flagged before metrics are computed.
+**Research or exploratory runs without formal IRR must explicitly disclose this limitation and must not represent the reference labels as established ground truth.** Unresolved IRR means unresolved ground truth — and unresolved ground truth makes population-level reliability estimates normative claims rather than validated measurements. Findings from such runs remain valid as exploratory evidence subject to that caveat.
 
 ### 3. Representative vs. Targeted/Risk Separation
 
