@@ -1,5 +1,9 @@
 # Judge Health Methodology v0.1
 
+> **Note**: This document has been superseded by [`docs/methodology.md`](./docs/methodology.md), which covers the full implementation including components added after Milestone 1. This root file is kept for backward compatibility.
+
+---
+
 ## Core Question
 
 The object of measurement is the **evaluator itself**, not the AI system it evaluates.
