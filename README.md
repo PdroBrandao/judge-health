@@ -6,6 +6,20 @@
 
 ---
 
+## Judge Health Protocol
+
+Judge Health treats a model-based evaluator as a measurement instrument that must itself be continuously validated.
+
+<p align="center">
+  <img src="docs/assets/judge-health-protocol.svg"
+       alt="Judge Health — Continuous Validation of Model-Based Evaluators"
+       width="100%">
+</p>
+
+The protocol connects human-reference evidence, evaluator reliability measurement, investigation, controlled intervention, revalidation, and an explicit promotion decision into an auditable improvement loop.
+
+---
+
 ## The Problem
 
 Model-based evaluators (LLM-as-judge) are increasingly used to automate quality assessment at scale. The core problem is **silent reliability degradation**:
@@ -15,6 +29,33 @@ Model-based evaluators (LLM-as-judge) are increasingly used to automate quality 
 - Without a formal protocol, evaluator changes are made by intuition, not evidence
 
 Headline metrics hide the failure modes that matter most.
+
+---
+
+## Live Calibration Result — Run #0001
+
+The first end-to-end live calibration cycle has been completed.
+
+```
+Calibration Run #0001 — Completed 2026-10-07
+
+Baseline (v0.2.0)                  Promoted (v0.2.0-candidate.20261007-fn7p)
+─────────────────────────────────  ──────────────────────────────────────────
+Overall Agreement      13.3%       Overall Agreement       91.7%   (+78.3pp)
+FAIL Recall           100%         FAIL Recall            100%    (preserved)
+False Positives        52          False Positives          5      (−47)
+Targeted FAIL detect   8/8         Targeted FAIL detect    8/8    (preserved)
+Targeted PASS correct  0/2         Targeted PASS correct   2/2
+
+12 candidates evaluated — 11 rejected — 1 promoted
+```
+
+**The candidate with the highest overall agreement (98.3%) was not promoted.**  
+Candidate #8 reached 98.3% OA but missed one targeted-risk FAIL case. Candidate #12 reached 91.7% OA and detected all 8/8 targeted-risk FAIL cases. The protocol required both.
+
+> Judge Health is not an accuracy optimizer. It is a reliability instrument for a defined evaluation objective that includes explicitly identified risk scenarios.
+
+[Read the full calibration experiment → docs/case-study.md](./docs/case-study.md)
 
 ---
 
@@ -123,7 +164,8 @@ Current test coverage spans: lifecycle integration, workflow store mutations, pe
 |---|---|
 | [`docs/methodology.md`](./docs/methodology.md) | Complete methodology — evaluator as measurement instrument, protocol components, failure modes |
 | [`docs/architecture.md`](./docs/architecture.md) | Source-derived architecture, data flow, security invariants |
-| [`docs/case-study.md`](./docs/case-study.md) | Live calibration experiment record (in progress) |
+| [`docs/case-study.md`](./docs/case-study.md) | Calibration Run #0001 — completed live calibration experiment |
+| [`docs/calibration-run-0001.md`](./docs/calibration-run-0001.md) | Immutable technical record of Run #0001 (all versions, metrics, decisions) |
 | [`LIMITATIONS.md`](./LIMITATIONS.md) | Known limitations and design constraints |
 
 ---
@@ -134,7 +176,7 @@ Current test coverage spans: lifecycle integration, workflow store mutations, pe
 
 This is a working research implementation of the Judge Health methodology. It is not a production-ready SaaS tool. It runs as a single-user local Next.js application. No authentication, no multi-tenancy, no hosted service.
 
-The calibration experiment documented in [`docs/case-study.md`](./docs/case-study.md) is ongoing.
+The first end-to-end live calibration cycle has been completed. Calibration Run #0001 evaluated 12 candidate evaluator versions and resulted in one human-approved promotion. The full record is in [`docs/case-study.md`](./docs/case-study.md).
 
 ---
 
