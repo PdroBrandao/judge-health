@@ -15,8 +15,13 @@ import { FixtureRepository } from "@/data/fixture-repository";
 import { WorkflowStore } from "@/data/workflow-store";
 import { RunStore, liveJudgmentsToJudgments } from "@/data/run-store";
 import { EvidenceRunSelector } from "@/components/EvidenceRunSelector";
+import { EvaluationSummaryPanel } from "@/components/EvaluationSummary";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { StatusLED } from "@/components/instrument/StatusLED";
+import {
+  buildEvaluationSummary,
+  recordedDecisionForRun,
+} from "@/app/evidence/evaluation-summary";
 import type { CandidateRecord, EvaluationRun, EvidenceSummary, CaseResult, Label } from "@/core/types";
 
 // ── RunOption — serializable, passed to client selector ───────
@@ -305,9 +310,12 @@ export default async function EvidencePage({
      selectedRun.status === "running")
   );
 
-  if (isLive && selectedRun) {
-    const converted = liveJudgmentsToJudgments(selectedRun.judgments);
-    const liveMap = new Map(converted.map((j) => [j.caseId, j.predictedLabel as Label]));
+  const liveJudgments = isLive && selectedRun
+    ? liveJudgmentsToJudgments(selectedRun.judgments)
+    : null;
+
+  if (liveJudgments) {
+    const liveMap = new Map(liveJudgments.map((j) => [j.caseId, j.predictedLabel as Label]));
     repSummaries = applyRunJudgments(repSummaries, liveMap);
     trgSummaries = applyRunJudgments(trgSummaries, liveMap);
   }
@@ -315,6 +323,21 @@ export default async function EvidencePage({
   const repFN = isLive ? repSummaries.filter((r) => r.result === "FN").length : 0;
   const repFP = isLive ? repSummaries.filter((r) => r.result === "FP").length : 0;
   const trgFN = isLive ? trgSummaries.filter((r) => r.result === "FN").length : 0;
+
+  const recordedDecision = recordedDecisionForRun(
+    selectedRunId ?? null,
+    candidates,
+    WorkflowStore.getAllDecisions(),
+  );
+  const evaluationSummary =
+    liveJudgments && selectedRun
+      ? buildEvaluationSummary({
+          cases: FixtureRepository.getCases(),
+          judgments: liveJudgments,
+          evaluatorVersion: selectedRun.evaluatorVersion,
+          recordedDecision,
+        })
+      : null;
 
   // ── Provenance line ───────────────────────────────────────
   // Find the matching RunOption for the selected run
@@ -415,6 +438,12 @@ export default async function EvidencePage({
           Population-level reliability estimates use the representative stream only.
           Targeted/risk cases are selected for investigation, not as an unbiased sample.
         </div>
+
+        <EvaluationSummaryPanel
+          summary={evaluationSummary}
+          selectedRunId={selectedRunId ?? null}
+          runLabel={selectedOption?.label ?? null}
+        />
 
         {/* ── REPRESENTATIVE SAMPLE ── */}
         <InstrumentPanel

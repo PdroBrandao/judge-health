@@ -16,7 +16,7 @@ Judge Health treats a model-based evaluator as a measurement instrument that mus
        width="100%">
 </p>
 
-The protocol connects human-reference evidence, evaluator reliability measurement, investigation, controlled intervention, revalidation, and an explicit promotion decision into an auditable improvement loop.
+The diagram shows the auditable loop: production evaluations from a configured model-based evaluator, reference labels and review, a representative sample for population-level reliability estimates, and separate targeted/risk cases excluded from those estimates. Reliability metrics feed metric and change triggers, then diagnosis and intervention. Each candidate is revalidated against the reference evidence. An Evidence Gate combines representative metrics, targeted/risk checks, and deployment-specific acceptance criteria. If the criteria are not met, the candidate is rejected and revised, then revalidated again. Meeting the criteria does not authorize promotion: explicit human approval is required first.
 
 ---
 
@@ -35,6 +35,10 @@ Headline metrics hide the failure modes that matter most.
 ## Live Calibration Result — Run #0001
 
 The first end-to-end live calibration cycle has been completed.
+
+The reference labels in Run #0001 are synthetic, AI-generated demonstration data, not independently annotated human ground truth. Production use requires an appropriately validated human-reference process.
+
+The figures below are the recorded outcome of that worked example. They are not an independently validated measure of effectiveness.
 
 ```
 Calibration Run #0001 — Completed 2026-10-07
@@ -64,22 +68,33 @@ Candidate #8 reached 98.3% OA but missed one targeted-risk FAIL case. Candidate 
 Judge Health operationalises a continuous validation lifecycle for model-based evaluators:
 
 ```
-Human Reference  →  Baseline Run  →  Reliability Profile
-                                            ↓
-                               Metric Trigger / Change Trigger
-                                            ↓
-                                       Diagnosis
-                                            ↓
-                                     Intervention
-                                            ↓
-                               Candidate Evaluator + Revalidation
-                                            ↓
-                               Human Accept / Reject Decision
-                                            ↓
-                               Calibration Record (immutable)
+Production evaluations (configured model-based evaluator)
+        ↓
+Reference labels and review
+        ↓
+Representative sample   →  population-level reliability estimates
+Targeted/risk cases     →  investigation only (excluded from those estimates)
+        ↓
+Reliability metrics  →  metric trigger / change trigger
+        ↓
+Diagnosis  →  Intervention
+        ↓
+Candidate revalidation against reference evidence
+        ↓
+Evidence Gate
+  representative metrics
+  + targeted/risk checks
+  + deployment-specific acceptance criteria
+        ↓
+   not met → reject and revise the candidate → revalidate again
+   met     → explicit human approval required
+        ↓
+Promote the approved candidate
+        ↓
+Calibration record (immutable)
 ```
 
-**Lifecycle invariant**: the active evaluator is never silently modified. Every change goes through candidate isolation, full revalidation, and an explicit human decision before promotion.
+**Lifecycle invariant**: the active evaluator is never silently modified. A candidate stays isolated until it is revalidated and checked at the Evidence Gate. Meeting acceptance criteria does not authorize promotion; a person must approve it. A rejection sends that candidate back for revision and another revalidation. The loop is operated by people, not an autonomous self-healing process.
 
 ---
 
@@ -182,8 +197,9 @@ The first end-to-end live calibration cycle has been completed. Calibration Run 
 
 ## AACI Framework
 
-Judge Health is part of the **AACI (AI Agent Continuous Improvement)** framework.  
-[AACI project — link coming soon]
+**AACI** is a broader continuous improvement and operational control framework for production AI agents. **Judge Health** is a focused measurement protocol for validating and recalibrating model-based evaluators. Judge Health is a component within the broader AACI approach, not a synonym for AACI.
+
+[AACI project](https://github.com/PdroBrandao/aaci)
 
 ---
 
