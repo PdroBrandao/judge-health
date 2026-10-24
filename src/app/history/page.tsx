@@ -267,10 +267,90 @@ export function buildDynamicEntries(
   return dynamic;
 }
 
-export default function HistoryPage() {
-  const activeVersion = FixtureRepository.getActiveEvaluatorVersion();
-  const entries = buildDynamicEntries(); // derived from persisted WorkflowStore + RunStore
+import { activeWorkspace } from "@/data/experiment-store";
+import { getDataset } from "@/data/datasets";
+import { listExperimentRuns } from "@/data/experiment-run-store";
+import { buildExperimentDashboard } from "@/core/experiment-dashboard";
+import type { ExperimentRecord } from "@/core/types";
 
+function experimentEntries(experiment: ExperimentRecord): LogEntry[] {
+  const dataset = getDataset(experiment.datasetId);
+  const entries: LogEntry[] = [];
+  const runs = listExperimentRuns().filter((run) => run.experimentId === experiment.id);
+  for (const run of runs) {
+    const view = dataset ? buildExperimentDashboard(experiment, run, dataset, FixtureRepository.getTriggerConfigs()) : null;
+    const current = run.runId === experiment.baselineRunId;
+    entries.push({
+      date: (run.completedAt ?? run.startedAt).slice(0, 10),
+      event: run.role === "candidate" ? "Candidate evaluation" : current ? "Current baseline" : "Previous baseline",
+      version: run.configVersion,
+      trigger: "—",
+      action: run.status,
+      state: current ? "BASELINE" : run.role === "candidate" ? "CANDIDATE" : "ARCHIVED",
+      stateVariant: run.status === "completed" ? "ok" : "warning",
+      ledStatus: run.status === "completed" ? "ok" : "warning",
+      detail: view
+        ? `Run ${run.runId} · n=${view.representativeN} · agreement ${pct(view.profile.overallAgreement)} · FP ${view.profile.confusionMatrix.FP} · FN ${view.profile.confusionMatrix.FN}`
+        : run.runId,
+    });
+  }
+  for (const diagnosis of experiment.workflow.diagnoses) {
+    entries.push({
+      date: diagnosis.createdAt.slice(0, 10),
+      event: "Diagnosis recorded",
+      version: diagnosis.evaluatorVersion,
+      trigger: diagnosis.triggerId,
+      action: diagnosis.category,
+      state: diagnosis.status.replace(/_/g, " ").toUpperCase(),
+      stateVariant: diagnosis.status === "resolved" ? "ok" : "warning",
+      ledStatus: diagnosis.status === "resolved" ? "ok" : "warning",
+      detail: diagnosis.observationNote,
+    });
+  }
+  for (const intervention of experiment.workflow.interventions) {
+    entries.push({
+      date: intervention.createdAt.slice(0, 10),
+      event: `Intervention #${intervention.attemptNumber}`,
+      version: intervention.baselineEvaluatorVersion,
+      trigger: "—",
+      action: intervention.status === "candidate_created" ? "Candidate configuration created" : "Draft",
+      state: intervention.status === "candidate_created" ? "CANDIDATE" : "DRAFT",
+      stateVariant: "warning",
+      ledStatus: "warning",
+      detail: intervention.rationale,
+    });
+  }
+  for (const decision of experiment.workflow.decisions) {
+    entries.push({
+      date: decision.decidedAt.slice(0, 10),
+      event: decision.decision === "accepted" ? "Candidate accepted and promoted" : "Candidate rejected",
+      version: `${decision.baselineVersion} → ${decision.candidateVersion}`,
+      trigger: "—",
+      action: decision.decision,
+      state: decision.decision === "accepted" ? "PROMOTED" : "REJECTED",
+      stateVariant: decision.decision === "accepted" ? "ok" : "error",
+      ledStatus: decision.decision === "accepted" ? "ok" : "error",
+      seal: decision.decision === "accepted" ? "VALIDATED" : "REVALIDATION REQUIRED",
+      detail: decision.rationale,
+    });
+  }
+  return entries.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export default function HistoryPage() {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    const entries = experimentEntries(workspace.experiment);
+    return <HistoryScreen title={workspace.experiment.name} entries={entries} footer="Named experiment · live evaluation" />;
+  }
+  const entries = buildDynamicEntries();
+
+  return (
+    <HistoryScreen title="Service Record" entries={entries} footer="TEST ENVIRONMENT · FIXTURE DATA" />
+  );
+}
+
+function HistoryScreen({ title, entries, footer }: { title: string; entries: LogEntry[]; footer: string }) {
   return (
     <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
       <div className="max-w-[900px] mx-auto space-y-4">
@@ -281,7 +361,7 @@ export default function HistoryPage() {
             Instrument JH-001
           </div>
           <h2 className="font-sketch text-[1.8rem] font-bold leading-none tracking-wide text-jh-text">
-            Service Record
+            {title}
           </h2>
           <p className="font-mono text-[11px] text-jh-dim mt-1.5">
             Calibration and validation history · reverse chronological
@@ -367,7 +447,7 @@ export default function HistoryPage() {
             JH-001 · AACI Framework · Evaluator Calibration Instrument
           </div>
           <div className="font-mono text-[9px] text-jh-dim border border-jh-border-lt px-2 py-1">
-            TEST ENVIRONMENT · FIXTURE DATA
+            {footer}
           </div>
         </div>
 

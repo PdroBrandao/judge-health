@@ -12,7 +12,6 @@
 import { PERSIST_DIR, WORKFLOW_FILE, RUNS_FILE } from "@/data/persistence";
 import { WorkflowStore } from "@/data/workflow-store";
 import { RunStore } from "@/data/run-store";
-import { actionResetExperiment } from "@/app/actions/workflow";
 import fs from "fs";
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -32,7 +31,11 @@ function fileStatus(filePath: string): { exists: boolean; sizeKb: string; mtime:
 
 // ── Page ──────────────────────────────────────────────────────
 
+import { activeExperimentGate } from "@/components/ActiveExperimentGate";
+
 export default function SettingsPage() {
+  const gated = activeExperimentGate();
+  if (gated) return gated;
   const workflowStat = fileStatus(WORKFLOW_FILE);
   const runsStat     = fileStatus(RUNS_FILE);
 
@@ -145,34 +148,22 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Reset Experiment — destructive */}
-        <div className="border border-jh-red/40 bg-red-50/10">
-          <div className="border-b border-jh-red/30 px-3 py-[5px] flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-jh-red">
+        {/* Reset is disabled for the archived Run #0001. */}
+        <div className="border border-jh-border-lt bg-jh-bg/40">
+          <div className="border-b border-jh-border-lt px-3 py-[5px] flex items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-jh-dim">
               Reset Experiment
             </span>
-            <span className="font-mono text-[9px] text-jh-red/60 border border-jh-red/30 px-1.5 py-0.5">
-              DESTRUCTIVE
+            <span className="font-mono text-[9px] text-jh-dim border border-jh-border-lt px-1.5 py-0.5">
+              DISABLED
             </span>
           </div>
-          <div className="p-3 space-y-3">
+          <div className="p-3">
             <p className="font-mono text-[10px] text-jh-dim leading-relaxed">
-              Permanently deletes all in-memory and persisted experiment state:
-              baseline run, diagnosis, all interventions, candidates, revalidation runs,
-              decisions, and judgments. This action is irreversible.
+              <span className="font-semibold text-jh-text">Read-only. </span>
+              Run #0001 is archived. Reset is disabled so the recorded baseline,
+              candidates, decisions, and evidence stay available.
             </p>
-            <p className="font-mono text-[10px] text-jh-red">
-              Use only before starting a new calibration experiment from scratch.
-              Do NOT use while an experiment is in progress.
-            </p>
-            <form action={actionResetExperiment}>
-              <button
-                type="submit"
-                className="font-mono text-[11px] font-semibold border-2 border-jh-red text-jh-red px-4 py-2 hover:bg-jh-red hover:text-white transition-colors uppercase tracking-[0.12em]"
-              >
-                Reset Experiment ✕
-              </button>
-            </form>
           </div>
         </div>
 

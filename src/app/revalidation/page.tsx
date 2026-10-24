@@ -23,7 +23,14 @@ import { ClickableConfusionMatrix } from "@/components/ClickableConfusionMatrix"
 import { RevalidationClient } from "@/components/RevalidationClient";
 import { LiveRunPanel } from "@/components/LiveRunPanel";
 
+import { activeWorkspace } from "@/data/experiment-store";
+import { ExperimentRevalidation } from "@/components/ExperimentRevalidation";
+
 export default function RevalidationPage() {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    return <ExperimentRevalidation experiment={workspace.experiment} />;
+  }
   // ── Baseline (active) evaluator ───────────────────────────
   const cases          = FixtureRepository.getCases();
   const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
@@ -792,6 +799,7 @@ export default function RevalidationPage() {
               taxonomyVersion={currentCandidate.taxonomyVersion}
               model={liveModel}
               existingRun={liveCandidateRun ?? undefined}
+              readOnly
             />
           </div>
         )}
@@ -825,6 +833,7 @@ export default function RevalidationPage() {
           liveRunsComplete={liveRunsComplete}
           baselineIsLive={baselineIsLive}
           candidateIsLive={candidateIsLive}
+          readOnly
         />
 
       </div>

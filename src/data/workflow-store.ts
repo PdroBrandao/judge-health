@@ -37,6 +37,7 @@ import {
   saveWorkflowState,
   clearPersistedState,
 } from "@/data/persistence";
+import { assertHistoricalExperimentWritable } from "@/data/historical-experiment";
 
 // ── State shape ───────────────────────────────────────────────
 interface WorkflowState {
@@ -167,6 +168,7 @@ export const WorkflowStore = {
   // ── Baseline run ──────────────────────────────────────────
 
   setBaselineRunId(runId: string): void {
+    assertHistoricalExperimentWritable("setBaselineRunId");
     _state = { ..._state, baselineRunId: runId };
     saveWorkflowState(_state);
   },
@@ -178,6 +180,7 @@ export const WorkflowStore = {
    * Multiple submissions for the same case overwrite previous.
    */
   submitBlindReview(data: Omit<BlindHumanReview, "id">): BlindHumanReview {
+    assertHistoricalExperimentWritable("submitBlindReview");
     const review: BlindHumanReview = { id: uid(), ...data };
     _state = {
       ..._state,
@@ -195,6 +198,7 @@ export const WorkflowStore = {
    * Only one diagnosis per session. Replaces previous if re-submitted.
    */
   submitDiagnosis(data: Omit<DiagnosisRecord, "id" | "status">): DiagnosisRecord {
+    assertHistoricalExperimentWritable("submitDiagnosis");
     const record: DiagnosisRecord = { id: uid(), ...data, status: "open" };
     _state = { ..._state, diagnosis: record };
     saveWorkflowState(_state);
@@ -209,6 +213,7 @@ export const WorkflowStore = {
   createIntervention(
     data: Omit<InterventionRecord, "id" | "status" | "attemptNumber">
   ): InterventionRecord {
+    assertHistoricalExperimentWritable("createIntervention");
     if (!_state.diagnosis) {
       throw new Error("WorkflowStore: cannot create intervention without an active diagnosis.");
     }
@@ -245,6 +250,7 @@ export const WorkflowStore = {
   createCandidate(
     data: Omit<CandidateRecord, "candidateId" | "interventionId" | "attemptNumber" | "status" | "createdAt" | "revalidationRunId" | "decisionId">
   ): CandidateRecord {
+    assertHistoricalExperimentWritable("createCandidate");
     const intervention = _state.interventions.find(
       (i) => i.id === _state.currentInterventionId
     );
@@ -284,6 +290,7 @@ export const WorkflowStore = {
    * Called when a live candidate run is created in RunStore.
    */
   setCurrentCandidateRunId(runId: string): void {
+    assertHistoricalExperimentWritable("setCurrentCandidateRunId");
     if (!_state.currentCandidateId) {
       throw new Error("WorkflowStore: no active candidate to attach run to.");
     }
@@ -305,6 +312,7 @@ export const WorkflowStore = {
    * REJECT: candidate status → "rejected"; baseline stays active.
    */
   recordDecision(data: Omit<RevalidationDecision, "id">): RevalidationDecision {
+    assertHistoricalExperimentWritable("recordDecision");
     if (!_state.currentCandidateId) {
       throw new Error("WorkflowStore: cannot record decision without an active candidate.");
     }
@@ -337,6 +345,7 @@ export const WorkflowStore = {
    * Precondition: must only be called after a "rejected" decision.
    */
   startNewAttempt(): void {
+    assertHistoricalExperimentWritable("startNewAttempt");
     _state = {
       ..._state,
       currentInterventionId: null,
@@ -352,6 +361,7 @@ export const WorkflowStore = {
 
   /** Reset to initial state. Tests and explicit Reset Experiment action only. */
   reset(): void {
+    assertHistoricalExperimentWritable("reset workflow");
     _state = { ...INITIAL_STATE };
     clearPersistedState();
   },

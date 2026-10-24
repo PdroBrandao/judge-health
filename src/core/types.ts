@@ -328,3 +328,90 @@ export interface EvaluationRun {
     completionTokens: number;
   };
 }
+
+// ── Named experiments (separate from Run #0001) ──────────────
+
+export interface InferenceParameters {
+  maxCompletionTokens: number;
+  responseFormat: "json_object";
+}
+
+export interface EvaluatorConfig {
+  id: string;
+  version: string;
+  modelId: string;
+  rubricText: string;
+  rubricVersion: string;
+  inference: InferenceParameters;
+  parentConfigId: string | null;
+}
+
+/**
+ * Diagnosis and intervention for one named experiment.
+ * Append-only. The baseline configuration is never overwritten here.
+ */
+export interface ExperimentWorkflow {
+  diagnosis: DiagnosisRecord | null;
+  /** Every diagnosis recorded on this experiment, including the current one. */
+  diagnoses: DiagnosisRecord[];
+  interventions: InterventionRecord[];
+  decisions: RevalidationDecision[];
+  currentInterventionId: string | null;
+  /** Baseline config plus later candidate configs. */
+  configs: EvaluatorConfig[];
+  currentCandidateConfigId: string | null;
+  currentCandidateRunId: string | null;
+}
+
+/** A named experiment. Run #0001 is not stored in this shape. */
+export interface ExperimentRecord {
+  id: string;
+  name: string;
+  status: "configured";
+  datasetId: string;
+  caseIds: string[];
+  baselineConfigId: string;
+  baselineRunId: string | null;
+  createdAt: string;
+  /** Logical baseline. Promotion in a later phase is what changes this. */
+  config: EvaluatorConfig;
+  workflow: ExperimentWorkflow;
+}
+
+export interface ExperimentCaseExecution {
+  caseId: string;
+  status: "completed" | "failed";
+  label?: Label;
+  rationale?: string;
+  latencyMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  error?: string;
+  attempts: number;
+}
+
+/** Live baseline for a named experiment. Never stored in the historical run file. */
+export interface ExperimentBaselineRun {
+  runId: string;
+  experimentId: string;
+  configId: string;
+  datasetId: string;
+  caseIds: string[];
+  modelId: string;
+  rubricVersion: string;
+  configVersion: string;
+  inference: InferenceParameters;
+  mode: "live";
+  /** Absent on baselines stored before candidate runs existed. */
+  role?: "baseline" | "candidate";
+  status: "running" | "completed" | "partial_failure" | "failed";
+  startedAt: string;
+  completedAt: string | null;
+  cases: ExperimentCaseExecution[];
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}

@@ -19,7 +19,8 @@ import "server-only";
 // ============================================================
 import fs   from "fs";
 import path from "path";
-import type { EvaluationRun } from "@/core/types";
+import type { EvaluationRun, ExperimentBaselineRun, ExperimentRecord } from "@/core/types";
+import { rejectHistoricalArtifactWrite } from "@/data/historical-experiment";
 
 // Re-imported here to avoid circular deps with workflow-store.ts
 // WorkflowState is defined locally (mirrored) — we use unknown
@@ -31,6 +32,17 @@ type AnyState = any;
 export const PERSIST_DIR   = path.join(process.cwd(), "experiment-data");
 export const WORKFLOW_FILE = path.join(PERSIST_DIR, "workflow-state.json");
 export const RUNS_FILE     = path.join(PERSIST_DIR, "run-store.json");
+export const EXPERIMENTS_FILE = path.join(PERSIST_DIR, "active-experiments.json");
+export const EXPERIMENT_RUNS_FILE = path.join(PERSIST_DIR, "experiment-runs.json");
+
+export interface ExperimentFileState {
+  activeExperimentId: string;
+  experiments: ExperimentRecord[];
+}
+
+export interface ExperimentRunFileState {
+  runs: ExperimentBaselineRun[];
+}
 
 // ── Environment guard ─────────────────────────────────────────
 // In test mode, skip real I/O in the store. Persistence tests
@@ -48,6 +60,8 @@ function ensureFileDir(filePath: string): void {
 
 /** Atomic write: write to .tmp then rename. */
 function atomicWrite(filePath: string, data: AnyState): void {
+  rejectHistoricalArtifactWrite(filePath);
+  rejectHistoricalArtifactWrite(filePath + ".tmp");
   ensureFileDir(filePath);
   const tmp = filePath + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
@@ -99,6 +113,8 @@ export function saveRuns(runs: EvaluationRun[]): void {
 /** Delete both persisted files. Called only by explicit Reset Experiment action. */
 export function clearPersistedState(): void {
   if (isTestEnv()) return;
+  rejectHistoricalArtifactWrite(WORKFLOW_FILE);
+  rejectHistoricalArtifactWrite(RUNS_FILE);
   for (const f of [WORKFLOW_FILE, RUNS_FILE]) {
     try { fs.unlinkSync(f); } catch { /* already gone */ }
     try { fs.unlinkSync(f + ".tmp"); } catch { /* already gone */ }
@@ -125,4 +141,51 @@ export function loadRunsFrom(filePath: string): EvaluationRun[] | null {
   const data = safeParse(filePath);
   if (!Array.isArray(data)) return null;
   return data as EvaluationRun[];
+}
+
+export function saveExperiments(state: ExperimentFileState): void {
+  if (isTestEnv()) return;
+  atomicWrite(EXPERIMENTS_FILE, state);
+}
+
+export function loadExperiments(): ExperimentFileState | null {
+  if (isTestEnv()) return null;
+  return parseExperimentFile(safeParse(EXPERIMENTS_FILE));
+}
+
+export function saveExperimentsTo(state: ExperimentFileState, filePath: string): void {
+  atomicWrite(filePath, state);
+}
+
+export function loadExperimentsFrom(filePath: string): ExperimentFileState | null {
+  return parseExperimentFile(safeParse(filePath));
+}
+
+export function saveExperimentRuns(state: ExperimentRunFileState): void {
+  if (isTestEnv()) return;
+  atomicWrite(EXPERIMENT_RUNS_FILE, state);
+}
+
+export function loadExperimentRuns(): ExperimentRunFileState | null {
+  if (isTestEnv()) return null;
+  return parseExperimentRuns(safeParse(EXPERIMENT_RUNS_FILE));
+}
+
+export function saveExperimentRunsTo(state: ExperimentRunFileState, filePath: string): void {
+  atomicWrite(filePath, state);
+}
+
+export function loadExperimentRunsFrom(filePath: string): ExperimentRunFileState | null {
+  return parseExperimentRuns(safeParse(filePath));
+}
+
+function parseExperimentRuns(data: AnyState | null): ExperimentRunFileState | null {
+  if (!data || typeof data !== "object" || !Array.isArray(data.runs)) return null;
+  return data as ExperimentRunFileState;
+}
+
+function parseExperimentFile(data: AnyState | null): ExperimentFileState | null {
+  if (!data || typeof data !== "object" || !Array.isArray(data.experiments)) return null;
+  if (typeof data.activeExperimentId !== "string") return null;
+  return data as ExperimentFileState;
 }

@@ -29,6 +29,12 @@ interface Props {
   revalidationDecision: RevalidationDecision | null;
   /** Number of previously rejected attempts (0 = this is the first). */
   previousAttemptCount: number;
+  /** Archived Run #0001 cannot create another intervention or candidate. */
+  readOnly?: boolean;
+  /** Set for a named experiment so the candidate is not written to Run #0001. */
+  experimentId?: string;
+  /** Historical flow opens Revalidation. A named experiment stays on this page until evaluation exists. */
+  showRevalidationLink?: boolean;
 }
 
 // ── Read-only view once intervention is created ───────────────
@@ -36,10 +42,14 @@ function InterventionReadOnly({
   intervention,
   wasRejected,
   previousAttemptCount,
+  readOnly = false,
+  showRevalidationLink = true,
 }: {
   intervention: InterventionRecord;
   wasRejected: boolean;
   previousAttemptCount: number;
+  readOnly?: boolean;
+  showRevalidationLink?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
 
@@ -96,10 +106,12 @@ function InterventionReadOnly({
 
       {intervention.status === "draft" && (
         <div className="border border-jh-amber/50 bg-amber-50/20 px-3 py-2 font-mono text-[10px] text-jh-amber">
-          Intervention saved as draft. Navigate to Revalidation to continue.
+          {showRevalidationLink
+            ? "Intervention saved as draft. Navigate to Revalidation to continue."
+            : "Intervention saved. The candidate configuration is not recorded yet."}
         </div>
       )}
-      {intervention.status === "candidate_created" && !wasRejected && (
+      {intervention.status === "candidate_created" && !wasRejected && showRevalidationLink && (
         <div className="border border-jh-green/40 bg-green-50/20 px-3 py-2 font-mono text-[10px] text-jh-green flex items-center justify-between gap-3">
           <span>Candidate created successfully.</span>
           <a
@@ -110,9 +122,21 @@ function InterventionReadOnly({
           </a>
         </div>
       )}
+      {intervention.status === "candidate_created" && !wasRejected && !showRevalidationLink && (
+        <div className="border border-jh-green/40 bg-green-50/20 px-3 py-2 font-mono text-[10px] text-jh-green">
+          Candidate configuration recorded. The baseline configuration is unchanged. Candidate evaluation is the next step.
+        </div>
+      )}
 
       {/* ── Start new attempt after rejection ─────────────── */}
-      {wasRejected && (
+      {wasRejected && readOnly && (
+        <div className="border border-jh-border-lt bg-jh-bg/40 px-3 py-2 font-mono text-[10px] text-jh-dim">
+          <span className="font-semibold text-jh-text">Read-only. </span>
+          Run #0001 cannot start another intervention.
+        </div>
+      )}
+
+      {wasRejected && !readOnly && (
         <div className="border border-jh-amber/50 bg-amber-50/10 px-3 py-3 space-y-2">
           <div className="font-mono text-[10px] text-jh-amber font-semibold">
             CANDIDATE REJECTED — Start next attempt
@@ -148,6 +172,9 @@ export function InterventionClient({
   existingIntervention,
   revalidationDecision,
   previousAttemptCount,
+  readOnly = false,
+  experimentId,
+  showRevalidationLink = true,
 }: Props) {
   // RC-3: Because the server component passes key={attemptNumber}, React will
   // fully remount this component when a new attempt starts, so useState here
@@ -163,7 +190,18 @@ export function InterventionClient({
         intervention={existingIntervention}
         wasRejected={revalidationDecision?.decision === "rejected"}
         previousAttemptCount={previousAttemptCount}
+        readOnly={readOnly}
+        showRevalidationLink={showRevalidationLink}
       />
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <p className="font-mono text-[10px] text-jh-dim py-2">
+        <span className="font-semibold text-jh-text">Read-only. </span>
+        Run #0001 cannot create an intervention or a candidate.
+      </p>
     );
   }
 
@@ -181,6 +219,7 @@ export function InterventionClient({
         baselineRubricVersion,
         proposedRubricText: proposedRubric,
         rationale,
+        experimentId,
       });
 
       // 2. Create the candidate from the intervention (sets currentCandidateId).
@@ -194,6 +233,7 @@ export function InterventionClient({
         rubricVersion: `${baselineRubricVersion}-proposed`,
         rubricText: proposedRubric,
         taxonomyVersion: baselineTaxonomyVersion,
+        experimentId,
       });
     });
   }
@@ -291,7 +331,7 @@ export function InterventionClient({
           </span>
         )}
         <span className="font-mono text-[10px] text-jh-dim ml-auto">
-          Will redirect to Revalidation
+          {showRevalidationLink ? "Will redirect to Revalidation" : "Saves a new configuration version"}
         </span>
       </div>
     </form>

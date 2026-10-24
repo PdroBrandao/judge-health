@@ -22,7 +22,11 @@ import {
   buildEvaluationSummary,
   recordedDecisionForRun,
 } from "@/app/evidence/evaluation-summary";
-import type { CandidateRecord, EvaluationRun, EvidenceSummary, CaseResult, Label } from "@/core/types";
+import type { CandidateRecord, EvaluationRun, EvidenceSummary, CaseResult, ExperimentRecord, Label } from "@/core/types";
+import { activeWorkspace } from "@/data/experiment-store";
+import { getDataset } from "@/data/datasets";
+import { getBaselineRunForExperiment } from "@/data/experiment-run-store";
+import { buildExperimentDashboard, experimentJudgments } from "@/core/experiment-dashboard";
 
 // ── RunOption — serializable, passed to client selector ───────
 export interface RunOption {
@@ -164,6 +168,97 @@ function ResultBadge({ result }: { result: CaseResult }) {
 }
 
 // ── Evidence table ────────────────────────────────────────────
+function ExperimentEvidence({ experiment }: { experiment: ExperimentRecord }) {
+  const dataset = getDataset(experiment.datasetId);
+  const run = getBaselineRunForExperiment(experiment.id) ?? null;
+  if (!dataset || !run) {
+    return (
+      <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
+        <div className="max-w-[1100px] mx-auto font-mono text-[11px] text-jh-dim">
+          This experiment has no baseline evidence yet.
+          <Link href="/" className="ml-2 text-jh-text">Run the baseline on Overview →</Link>
+        </div>
+      </main>
+    );
+  }
+  const view = buildExperimentDashboard(
+    experiment,
+    run,
+    dataset,
+    FixtureRepository.getTriggerConfigs(),
+  );
+  const cases = dataset.cases
+    .filter((item) => experiment.caseIds.includes(item.id))
+    .map((item) => ({ id: item.id, groundTruth: item.groundTruth, sampleType: item.sampleType }));
+  const summary = buildEvaluationSummary({
+    cases,
+    judgments: experimentJudgments(experiment, run),
+    evaluatorVersion: experiment.config.version,
+    recordedDecision: null,
+  });
+  const repFN = view.representativeEvidence.filter((row) => row.result === "FN").length;
+  const repFP = view.representativeEvidence.filter((row) => row.result === "FP").length;
+  const trgFN = view.targetedEvidence.filter((row) => row.result === "FN").length;
+
+  return (
+    <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
+      <div className="max-w-[1100px] mx-auto">
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-jh-border-lt">
+          <div>
+            <h2 className="font-sketch text-[1.6rem] font-bold leading-none tracking-wide text-jh-text">Evidence</h2>
+            <p className="font-mono text-[11px] text-jh-dim mt-0.5">{experiment.name}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/diagnose" className="font-mono text-[10px] border border-jh-border px-2 py-1 text-jh-text">
+              Diagnose →
+            </Link>
+            <span className="font-mono text-[10px] border border-jh-green/60 text-jh-green px-2 py-1">
+              LIVE · {run.modelId} · {run.runId.slice(-8).toUpperCase()}
+            </span>
+          </div>
+        </div>
+        {dataset.demonstration && (
+          <p className="font-mono text-[10px] border border-jh-amber/50 bg-amber-50/30 text-jh-amber px-3 py-2 mb-3">
+            Synthetic demonstration data. {view.representativeN} representative and {view.targetedN} targeted/risk cases.
+            Not a statistically validated calibration.
+          </p>
+        )}
+        <div className="font-mono text-[10px] border border-jh-border-lt bg-jh-panel px-3 py-2 mb-3 flex flex-wrap gap-4">
+          <span className="text-jh-dim">Run <span className="text-jh-text">{run.runId}</span></span>
+          <span className="text-jh-dim">Model <span className="text-jh-text">{run.modelId}</span></span>
+          <span className="text-jh-dim">Rubric <span className="text-jh-text">{run.rubricVersion}</span></span>
+          <span className="text-jh-dim">Mode <span className="text-jh-text">LIVE</span></span>
+        </div>
+        <EvaluationSummaryPanel summary={summary} selectedRunId={null} runLabel="Experiment baseline" />
+        <InstrumentPanel
+          label={`Representative sample — n=${view.representativeEvidence.length} · not a validated calibration`}
+          className="mb-3"
+          noPadding
+        >
+          <div className="flex items-center gap-6 px-3 py-2 border-b border-jh-border-lt bg-jh-bg/40 font-mono text-[10px]">
+            <span className="text-jh-green">
+              {view.representativeEvidence.filter((row) => row.result === "TP" || row.result === "TN").length} correct
+            </span>
+            {repFN > 0 && <span className="text-jh-red">{repFN} missed FAIL</span>}
+            {repFP > 0 && <span className="text-jh-amber">{repFP} false alarm</span>}
+          </div>
+          <EvidenceTable rows={view.representativeEvidence} isLive selectedRunId={null} />
+        </InstrumentPanel>
+        <InstrumentPanel
+          label={`Targeted / risk — n=${view.targetedEvidence.length} · excluded from representative estimates`}
+          noPadding
+        >
+          <div className="px-3 py-1.5 border-b border-jh-border-lt bg-amber-50/30 font-mono text-[10px] text-jh-amber">
+            Targeted/risk cases stay outside the representative reliability estimate.
+            {trgFN > 0 && <span className="text-jh-red ml-2">{trgFN} missed FAIL</span>}
+          </div>
+          <EvidenceTable rows={view.targetedEvidence} showRiskNote isLive selectedRunId={null} />
+        </InstrumentPanel>
+      </div>
+    </main>
+  );
+}
+
 function EvidenceTable({
   rows,
   showRiskNote = false,
@@ -285,6 +380,10 @@ export default async function EvidencePage({
 }: {
   searchParams: Promise<{ run?: string }>;
 }) {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    return <ExperimentEvidence experiment={workspace.experiment} />;
+  }
   const { run: runParam } = await searchParams;
 
   // ── Build selector options ────────────────────────────────

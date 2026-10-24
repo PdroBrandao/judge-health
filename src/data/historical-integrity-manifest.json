@@ -1,0 +1,26 @@
+{
+  "experimentId": "run-0001",
+  "files": {
+    "workflow-state.json": {
+      "sha256": "7e90e437a0450394a65f60328e9d05053afe32bfd5ef4e1244632275ce7f4960",
+      "bytes": 138570
+    },
+    "run-store.json": {
+      "sha256": "8fd8ebb3abe7dbb325b1cb409ce362a14f192041bb13d996379378d7cc13fb7f",
+      "bytes": 561385
+    }
+  },
+  "expected": {
+    "candidates": 12,
+    "decisions": 12,
+    "interventions": 12,
+    "rubricTexts": 12,
+    "runs": 13,
+    "diagnosisId": "mux66r9v83ga3",
+    "diagnosisStatus": "resolved",
+    "baselineRunId": "run-mux5c1dn-au6d",
+    "supersededVersion": "v0.2.0",
+    "acceptedAttempt": 12,
+    "acceptedVersion": "v0.2.0-candidate.20261007-fn7p"
+  }
+}

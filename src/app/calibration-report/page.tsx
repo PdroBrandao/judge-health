@@ -35,7 +35,93 @@ import { ACTIVE_RUBRIC_TEXT as BASELINE_RUBRIC_TEXT } from "@/data/rubric-text";
 // computeReliabilityProfile filters internally; classifyCasesForMatrix uses
 // the case array passed to it, so we pass repCases for representative FN/FP.
 
+import { activeWorkspace } from "@/data/experiment-store";
+import { getDataset } from "@/data/datasets";
+import { getBaselineRunForExperiment, getCandidateRunForExperiment, getExperimentRun } from "@/data/experiment-run-store";
+import { buildExperimentDashboard } from "@/core/experiment-dashboard";
+import { RubricDiff as ExperimentRubricDiff } from "@/components/RubricDiff";
+import type { ExperimentRecord } from "@/core/types";
+
+function ExperimentReport({ experiment }: { experiment: ExperimentRecord }) {
+  const dataset = getDataset(experiment.datasetId);
+  const baseline = getBaselineRunForExperiment(experiment.id) ?? null;
+  const candidateRun = getCandidateRunForExperiment(experiment.id) ?? null;
+  const candidate = experiment.workflow.configs.find((item) => item.id === experiment.workflow.currentCandidateConfigId) ?? null;
+  const view = dataset && baseline
+    ? buildExperimentDashboard(experiment, baseline, dataset, FixtureRepository.getTriggerConfigs())
+    : null;
+  const candidateView = dataset && candidate && candidateRun?.status === "completed"
+    ? buildExperimentDashboard({ ...experiment, config: candidate }, candidateRun, dataset, FixtureRepository.getTriggerConfigs())
+    : null;
+  const previous = experiment.workflow.configs.find((item) => item.id === experiment.config.parentConfigId) ?? null;
+  const latest = experiment.workflow.decisions.at(-1) ?? null;
+
+  return (
+    <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
+      <div className="max-w-[900px] mx-auto space-y-4">
+        <div className="border-b border-jh-border-lt pb-3">
+          <h2 className="font-sketch text-[1.6rem] font-bold leading-none tracking-wide text-jh-text">Calibration Report</h2>
+          <p className="font-mono text-[11px] text-jh-dim mt-1">{experiment.name} · current baseline {experiment.config.version}</p>
+        </div>
+        {!view && (
+          <InstrumentPanel label="Report" accent="warn">
+            <p className="font-mono text-[11px] text-jh-dim">A completed baseline is required before this report has measurements.</p>
+          </InstrumentPanel>
+        )}
+        {view && (
+          <InstrumentPanel label="Current baseline" noPadding>
+            <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-jh-border-lt font-mono">
+              {[
+                ["Agreement", pct(view.profile.overallAgreement)],
+                ["FAIL recall", pct(view.profile.perClass.FAIL.recall)],
+                ["FAIL precision", pct(view.profile.perClass.FAIL.precision)],
+                ["n", String(view.representativeN)],
+              ].map(([label, value]) => (
+                <div key={label} className="px-4 py-3">
+                  <div className="font-bold text-lg text-jh-text">{value}</div>
+                  <div className="text-[9px] text-jh-dim uppercase">{label}</div>
+                </div>
+              ))}
+            </div>
+            <p className="px-4 py-2 border-t border-jh-border-lt font-mono text-[10px] text-jh-dim">
+              FP {view.profile.confusionMatrix.FP} · FN {view.profile.confusionMatrix.FN} · TP {view.profile.confusionMatrix.TP} · TN {view.profile.confusionMatrix.TN}. Targeted/risk n={view.targetedN} is excluded.
+            </p>
+          </InstrumentPanel>
+        )}
+        {view && candidateView && (
+          <InstrumentPanel label="Open comparison">
+            <p className="font-mono text-[11px] text-jh-text">
+              Candidate {candidate?.version} agreement {pct(candidateView.profile.overallAgreement)} versus baseline {pct(view.profile.overallAgreement)}.
+            </p>
+            <Link href="/revalidation" className="inline-block mt-2 font-mono text-[11px] border border-jh-border px-3 py-1.5">Open revalidation →</Link>
+          </InstrumentPanel>
+        )}
+        {latest && (
+          <InstrumentPanel label="Latest decision" accent={latest.decision === "accepted" ? "ok" : "error"}>
+            <p className="font-mono text-[11px]">
+              {latest.decision === "accepted" ? "Accepted" : "Rejected"} · {latest.baselineVersion} → {latest.candidateVersion}
+            </p>
+            <p className="font-mono text-[10px] text-jh-dim mt-1">{latest.rationale}</p>
+          </InstrumentPanel>
+        )}
+        {previous && (
+          <InstrumentPanel label="Rubric change from the previous baseline">
+            <ExperimentRubricDiff before={previous.rubricText} after={experiment.config.rubricText} />
+          </InstrumentPanel>
+        )}
+        {experiment.baselineRunId && getExperimentRun(experiment.baselineRunId)?.runId && (
+          <p className="font-mono text-[10px] text-jh-dim">Baseline run {experiment.baselineRunId}. Earlier runs remain stored with this experiment.</p>
+        )}
+      </div>
+    </main>
+  );
+}
+
 export default function CalibrationReportPage() {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    return <ExperimentReport experiment={workspace.experiment} />;
+  }
   // ── Read all immutable arrays from WorkflowStore ──────────
   const candidates    = WorkflowStore.getAllCandidates();
   const interventions = WorkflowStore.getAllInterventions();

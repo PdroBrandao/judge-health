@@ -30,9 +30,15 @@ import { TriggerCard } from "@/components/trigger-card";
 import { ReliabilityProfilePanel } from "@/components/reliability-profile";
 import { LiveRunPanel } from "@/components/LiveRunPanel";
 import { SmokeTestPanel } from "@/components/SmokeTestPanel";
+import { activeWorkspace } from "@/data/experiment-store";
+import { ExperimentOverview } from "@/components/ExperimentOverview";
 import { ACTIVE_RUBRIC_TEXT } from "@/data/rubric-text";
 
 export default function OverviewPage() {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    return <ExperimentOverview experiment={workspace.experiment} />;
+  }
   // ── Load fixture data ────────────────────────────────────────
   const cases          = FixtureRepository.getCases();
   const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
@@ -156,6 +162,7 @@ export default function OverviewPage() {
               taxonomyVersion={activeTaxonomy.version}
               model={liveModel}
               existingRun={liveBaselineRun ?? undefined}
+              readOnly
             />
           </div>
         )}
@@ -646,6 +653,7 @@ export default function OverviewPage() {
               rubricText={ACTIVE_RUBRIC_TEXT}
               evaluatorVersion={activeVersion.version}
               rubricVersion={activeRubric.version}
+              readOnly
             />
           </div>
         )}
@@ -662,6 +670,7 @@ export default function OverviewPage() {
               taxonomyVersion={activeTaxonomy.version}
               model={liveModel}
               existingRun={liveBaselineRun ?? undefined}
+              readOnly
             />
           </div>
         )}

@@ -10,6 +10,7 @@ const STATUS_STYLES: Record<EvaluatorStatus, string> = {
   validated:  "text-jh-green border-jh-green",
   active:     "text-jh-green border-jh-green font-bold",
   superseded: "text-jh-dim border-jh-border-lt line-through",
+  rejected:   "text-jh-red border-jh-red",
 };
 
 interface Props {

@@ -17,6 +17,11 @@ import { RunStore } from "@/data/run-store";
 import { InstrumentPanel } from "@/components/instrument/InstrumentPanel";
 import { StatusLED } from "@/components/instrument/StatusLED";
 import { CaseDetail } from "@/components/CaseDetail";
+import { activeExperimentGate } from "@/components/ActiveExperimentGate";
+import { activeWorkspace } from "@/data/experiment-store";
+import { getDataset } from "@/data/datasets";
+import { getBaselineRunForExperiment } from "@/data/experiment-run-store";
+import { experimentCaseDetail } from "@/core/experiment-dashboard";
 import type { CaseResult, Label } from "@/core/types";
 
 export default async function CaseDetailPage({
@@ -27,6 +32,26 @@ export default async function CaseDetailPage({
   searchParams: Promise<{ from?: string; run?: string }>;
 }) {
   const { id }   = await params;
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    const dataset = getDataset(workspace.experiment.datasetId);
+    const run = getBaselineRunForExperiment(workspace.experiment.id) ?? null;
+    const detail = dataset ? experimentCaseDetail(workspace.experiment, run, dataset, id) : null;
+    if (!detail || !run) notFound();
+    return (
+      <main className="min-h-screen bg-jh-bg p-3 lg:p-4">
+        <div className="max-w-[900px] mx-auto space-y-3">
+          <Link href="/evidence" className="font-mono text-[10px] text-jh-dim hover:text-jh-text">← Evidence</Link>
+          <div className="font-mono text-[10px] text-jh-dim border border-jh-border-lt px-3 py-2">
+            LIVE · {run.modelId} · {run.rubricVersion} · {run.runId} · {detail.result}
+          </div>
+          <CaseDetail data={detail} readOnly showDiagnoseLink />
+        </div>
+      </main>
+    );
+  }
+  const gated = activeExperimentGate();
+  if (gated) return gated;
   const { from, run: runParam } = await searchParams;
   const fromRevalidation = from === "revalidation";
 
@@ -364,7 +389,7 @@ export default async function CaseDetailPage({
         <InstrumentPanel
           label={`Case Detail — ${id} — ${resultLabels[detail.result]}`}
         >
-          <CaseDetail data={detail} existingBlindReview={existingBlindReview} />
+          <CaseDetail data={detail} existingBlindReview={existingBlindReview} readOnly />
         </InstrumentPanel>
 
         {/* Note */}

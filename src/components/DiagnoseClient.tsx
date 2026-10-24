@@ -17,6 +17,10 @@ interface Props {
   firedTriggerIds: string[];
   evaluatorVersion: string;
   existingDiagnosis: DiagnosisRecord | null;
+  readOnly?: boolean;
+  /** Set for a named experiment so the diagnosis is not written to Run #0001. */
+  experimentId?: string;
+  formLabel?: string;
 }
 
 const CATEGORIES: { id: DiagnosisCategory; label: string; description: string }[] = [
@@ -47,9 +51,11 @@ const CATEGORIES: { id: DiagnosisCategory; label: string; description: string }[
 ];
 
 // ── Read-only submitted view ──────────────────────────────────
-function DiagnosisReadOnly({ diagnosis, onReset }: {
+function DiagnosisReadOnly({ diagnosis, onReset, readOnly = false, experimentId }: {
   diagnosis: DiagnosisRecord;
   onReset: () => void;
+  readOnly?: boolean;
+  experimentId?: string;
 }) {
   const catLabel = CATEGORIES.find((c) => c.id === diagnosis.category)?.label ?? diagnosis.category;
   const statusColors = {
@@ -118,12 +124,16 @@ function DiagnosisReadOnly({ diagnosis, onReset }: {
         )}
         {diagnosis.revalidationRequested && diagnosis.status === "intervention_created" && (
           <div className="border border-jh-green/50 bg-green-50/20 px-3 py-2 font-mono text-[10px] text-jh-green flex items-center justify-between gap-3">
-            <span>Intervention created. Candidate ready for revalidation.</span>
+            <span>
+              {experimentId
+                ? "Intervention recorded. The candidate configuration stays on this experiment."
+                : "Intervention created. Candidate ready for revalidation."}
+            </span>
             <a
-              href="/revalidation"
+              href={experimentId ? "/intervention" : "/revalidation"}
               className="font-mono text-[11px] border border-jh-green/70 text-jh-green px-3 py-1 hover:bg-green-50/40 transition-colors whitespace-nowrap"
             >
-              View Revalidation →
+              {experimentId ? "View Intervention →" : "View Revalidation →"}
             </a>
           </div>
         )}
@@ -133,13 +143,15 @@ function DiagnosisReadOnly({ diagnosis, onReset }: {
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={onReset}
-          className="font-mono text-[10px] border border-jh-border text-jh-dim px-3 py-1.5 hover:bg-jh-bg transition-colors"
-        >
-          Start new diagnosis
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="font-mono text-[10px] border border-jh-border text-jh-dim px-3 py-1.5 hover:bg-jh-bg transition-colors"
+          >
+            Start new diagnosis
+          </button>
+        )}
       </div>
     </InstrumentPanel>
   );
@@ -151,11 +163,15 @@ export function DiagnoseClient({
   firedTriggerIds,
   evaluatorVersion,
   existingDiagnosis,
+  readOnly = false,
+  experimentId,
+  formLabel,
 }: Props) {
   const [category, setCategory]         = useState<DiagnosisCategory | null>(null);
   const [note, setNote]                 = useState("");
   const [triggerRevalidation, setTriggerRevalidation] = useState(false);
   const [isPending, startTransition]    = useTransition();
+  const [error, setError]               = useState<string | null>(null);
   // Local override: if user clicks "Start new diagnosis", hide existing
   const [hideExisting, setHideExisting] = useState(false);
 
@@ -165,15 +181,20 @@ export function DiagnoseClient({
     e.preventDefault();
     if (!canSubmit || isPending) return;
     const triggerId = firedTriggerIds[0] ?? "manual";
+    setError(null);
     startTransition(async () => {
-      await actionSubmitDiagnosis({
-        triggerId,
-        evaluatorVersion,
-        category: category!,
-        observationNote: note,
-        revalidationRequested: triggerRevalidation,
-      });
-      // Server will revalidatePath; page re-renders with existingDiagnosis set
+      try {
+        await actionSubmitDiagnosis({
+          triggerId,
+          evaluatorVersion,
+          category: category!,
+          observationNote: note,
+          revalidationRequested: triggerRevalidation,
+          experimentId,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "The diagnosis could not be recorded.");
+      }
     });
   }
 
@@ -183,14 +204,27 @@ export function DiagnoseClient({
       <DiagnosisReadOnly
         diagnosis={existingDiagnosis}
         onReset={() => setHideExisting(true)}
+        readOnly={readOnly}
+        experimentId={experimentId}
       />
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <InstrumentPanel label="Diagnosis">
+        <p className="font-mono text-[10px] text-jh-dim py-2">
+          <span className="font-semibold text-jh-text">Read-only. </span>
+          Run #0001 cannot record or replace a diagnosis.
+        </p>
+      </InstrumentPanel>
     );
   }
 
   // Show form
   return (
     <InstrumentPanel
-      label={`Diagnosis Form — ${firedCount} trigger${firedCount !== 1 ? "s" : ""} open`}
+      label={formLabel ?? `Diagnosis Form — ${firedCount} trigger${firedCount !== 1 ? "s" : ""} open`}
     >
       <form onSubmit={handleSubmit} className="space-y-5">
 
@@ -297,6 +331,7 @@ export function DiagnoseClient({
             </span>
           )}
         </div>
+        {error && <p className="font-mono text-[10px] text-jh-red">{error}</p>}
       </form>
     </InstrumentPanel>
   );

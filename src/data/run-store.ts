@@ -21,6 +21,7 @@ import type {
   RunError,
 } from "@/core/types";
 import { loadRuns, saveRuns, clearPersistedState } from "@/data/persistence";
+import { assertHistoricalExperimentWritable } from "@/data/historical-experiment";
 
 // ── Module-level singleton — hydrate from disk on startup ─────
 let _runs: EvaluationRun[] = loadRuns() ?? [];
@@ -86,6 +87,7 @@ export const RunStore = {
 
   /** Create a new run. Returns the run record with generated runId. */
   createRun(params: Omit<EvaluationRun, "runId" | "startedAt" | "completedAt" | "status" | "judgments" | "errors" | "usage">): EvaluationRun {
+    assertHistoricalExperimentWritable("createRun");
     const run: EvaluationRun = {
       ...params,
       runId: uid(),
@@ -103,6 +105,7 @@ export const RunStore = {
 
   /** Transition status to "running". Call after createRun to mark start. */
   startRun(runId: string): void {
+    assertHistoricalExperimentWritable("startRun");
     _runs = _runs.map((r) =>
       r.runId === runId ? { ...r, status: "running" as const } : r
     );
@@ -111,6 +114,7 @@ export const RunStore = {
 
   /** Append a successful judgment to a run. Throws if run is sealed. */
   addJudgment(runId: string, judgment: LiveJudgment): void {
+    assertHistoricalExperimentWritable("addJudgment");
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
     if (run.status === "completed") {
@@ -133,6 +137,7 @@ export const RunStore = {
 
   /** Append a failed case error to a run. Throws if run is sealed. */
   addError(runId: string, error: RunError): void {
+    assertHistoricalExperimentWritable("addError");
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
     if (run.status === "completed") {
@@ -146,6 +151,7 @@ export const RunStore = {
 
   /** Replace an error with a successful judgment (retry). Throws if run is sealed. */
   resolveError(runId: string, caseId: string, judgment: LiveJudgment): void {
+    assertHistoricalExperimentWritable("resolveError");
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
     if (run.status === "completed") {
@@ -174,6 +180,7 @@ export const RunStore = {
    * Sets status to "completed" if no errors, "partial_failure" if some cases failed.
    */
   completeRun(runId: string): EvaluationRun {
+    assertHistoricalExperimentWritable("completeRun");
     const run = _runs.find((r) => r.runId === runId);
     if (!run) throw new Error(`RunStore: run ${runId} not found.`);
     // Idempotent: if already sealed, return the existing run without re-mutating.
@@ -192,6 +199,7 @@ export const RunStore = {
 
   /** Fail a run entirely. */
   failRun(runId: string, reason: string): void {
+    assertHistoricalExperimentWritable("failRun");
     _runs = _runs.map((r) => {
       if (r.runId !== runId) return r;
       return {
@@ -211,6 +219,7 @@ export const RunStore = {
 
   /** Reset all runs. Test isolation and explicit Reset Experiment action only. */
   reset(): void {
+    assertHistoricalExperimentWritable("reset runs");
     _runs = [];
     clearPersistedState();
   },

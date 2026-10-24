@@ -34,6 +34,8 @@ interface Props {
   taxonomyVersion: string;
   model: string;
   existingRun?: EvaluationRun;
+  /** Archived Run #0001 cannot start or retry a live run. */
+  readOnly?: boolean;
 }
 
 type LocalStatus =
@@ -77,6 +79,7 @@ export function LiveRunPanel({
   taxonomyVersion,
   model,
   existingRun,
+  readOnly = false,
 }: Props) {
   // Hydrate from server-side run if available
   const getInitialStatus = (): LocalStatus => {
@@ -102,6 +105,15 @@ export function LiveRunPanel({
 
   const total = sampleCaseIds.length;
   const buttonLabel = type === "baseline" ? "RUN LIVE BASELINE" : "RUN LIVE REVALIDATION";
+
+  if (readOnly && localStatus !== "completed") {
+    return (
+      <div className="border border-jh-border-lt bg-jh-panel px-4 py-3 font-mono text-[10px] text-jh-dim">
+        <span className="font-semibold text-jh-text">Read-only. </span>
+        Run #0001 cannot start or retry a live evaluation.
+      </div>
+    );
+  }
   const isActive = localStatus === "running" || localStatus === "retrying" || localStatus === "confirming";
 
   // ── Execute the run loop ────────────────────────────────────

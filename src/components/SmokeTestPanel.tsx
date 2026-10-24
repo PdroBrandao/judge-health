@@ -15,9 +15,11 @@ interface Props {
   rubricText: string;
   evaluatorVersion: string;
   rubricVersion: string;
+  /** Archived Run #0001 cannot reset stored runs. */
+  readOnly?: boolean;
 }
 
-export function SmokeTestPanel({ smokeCaseId, rubricText, evaluatorVersion, rubricVersion }: Props) {
+export function SmokeTestPanel({ smokeCaseId, rubricText, evaluatorVersion, rubricVersion, readOnly = false }: Props) {
   const [result, setResult]           = useState<SmokeTestResult | null>(null);
   const [isPending, startTransition]  = useTransition();
   const [isResetting, startReset]     = useTransition();
@@ -97,7 +99,15 @@ export function SmokeTestPanel({ smokeCaseId, rubricText, evaluatorVersion, rubr
         )}
       </div>
 
+      {readOnly && (
+        <div className="border-t border-jh-border-lt pt-3 font-mono text-[10px] text-jh-dim">
+          <span className="font-semibold text-jh-text">Read-only. </span>
+          Reset is disabled for archived Run #0001.
+        </div>
+      )}
+
       {/* ── Reset ────────────────────────────────────────────── */}
+      {!readOnly && (
       <div className="border-t border-jh-border-lt pt-3 space-y-2">
         <div className="text-[10px] text-jh-dim">
           Reset all run state (RunStore + WorkflowStore). Implementation and fixtures are preserved.
@@ -145,6 +155,7 @@ export function SmokeTestPanel({ smokeCaseId, rubricText, evaluatorVersion, rubr
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

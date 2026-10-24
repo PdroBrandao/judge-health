@@ -20,6 +20,7 @@ import "server-only";
 import OpenAI from "openai";
 import { z } from "zod";
 import type { EvaluatorAdapter, EvaluatorInput, EvaluatorOutput } from "./evaluator-adapter";
+import { clampOutputTokens } from "./retry-policy";
 
 // ── Zod schema for validated LLM output ──────────────────────
 export const JudgmentResponseSchema = z.object({
@@ -153,6 +154,52 @@ export class OpenAIEvaluator implements EvaluatorAdapter {
       rationale:   validated.rationale,
       usageTokens: usage.totalTokens,
       usage,
+    };
+  }
+
+  /**
+   * One model call for a named experiment.
+   * Uses that experiment's model and token cap. Does not retry; the caller does.
+   */
+  async judgeConfiguredCase(
+    input: EvaluatorInput,
+    options: { modelId: string; maxCompletionTokens: number; timeoutMs: number; responseFormat: "json_object" },
+  ): Promise<OpenAIJudgmentResult & { latencyMs: number }> {
+    const started = Date.now();
+    const completion = await getClient().chat.completions.create({
+      model: options.modelId,
+      response_format: { type: options.responseFormat },
+      max_completion_tokens: clampOutputTokens(options.maxCompletionTokens),
+      messages: [
+        { role: "system", content: buildSystemPrompt() },
+        { role: "user", content: buildUserPrompt(input) },
+      ],
+    }, {
+      timeout: options.timeoutMs,
+      maxRetries: 0,
+    });
+
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error(`OpenAI returned empty content for case ${input.caseId}.`);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`OpenAI response was not valid JSON for case ${input.caseId}.`);
+    }
+    const validated = JudgmentResponseSchema.parse(parsed);
+    const usage: OpenAIUsage = {
+      totalTokens: completion.usage?.total_tokens ?? 0,
+      promptTokens: completion.usage?.prompt_tokens ?? 0,
+      completionTokens: completion.usage?.completion_tokens ?? 0,
+    };
+    return {
+      label: validated.label,
+      rationale: validated.rationale,
+      usageTokens: usage.totalTokens,
+      usage,
+      latencyMs: Date.now() - started,
     };
   }
 

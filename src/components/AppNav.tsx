@@ -21,18 +21,49 @@ import type { MetricTriggerConfig } from "@/core/types";
 import { StatusLED } from "@/components/instrument/StatusLED";
 import { CalibrationSeal } from "@/components/instrument/CalibrationSeal";
 import { AppNavActiveLink } from "@/components/AppNavActiveLink";
+import { activeWorkspace } from "@/data/experiment-store";
+import { getDataset } from "@/data/datasets";
+import { getExperimentRun } from "@/data/experiment-run-store";
+import { buildExperimentDashboard } from "@/core/experiment-dashboard";
 
 const NAV_LINKS = [
-  { href: "/",              label: "OVERVIEW" },
-  { href: "/evidence",      label: "EVIDENCE" },
-  { href: "/diagnose",      label: "DIAGNOSE" },
-  { href: "/intervention",  label: "INTERVENTION" },
-  { href: "/revalidation",  label: "REVALIDATION" },
-  { href: "/history",              label: "HISTORY" },
+  { href: "/experiments",         label: "EXPERIMENTS" },
+  { href: "/datasets",            label: "DATASETS" },
+  { href: "/",                    label: "OVERVIEW" },
+  { href: "/evidence",            label: "EVIDENCE" },
+  { href: "/diagnose",            label: "DIAGNOSE" },
+  { href: "/intervention",        label: "INTERVENTION" },
+  { href: "/revalidation",        label: "REVALIDATION" },
+  { href: "/history",             label: "HISTORY" },
   { href: "/calibration-report",  label: "REPORT" },
 ] as const;
 
 export async function AppNav() {
+  const workspace = activeWorkspace();
+  if (workspace.mode === "configured") {
+    const baseline = workspace.experiment.baselineRunId
+      ? getExperimentRun(workspace.experiment.baselineRunId)
+      : undefined;
+    const dataset = getDataset(workspace.experiment.datasetId);
+    const view = dataset
+      ? buildExperimentDashboard(
+          workspace.experiment,
+          baseline ?? null,
+          dataset,
+          FixtureRepository.getTriggerConfigs(),
+        )
+      : null;
+    const firedCount = view?.measured
+      ? view.triggerResults.filter((item) => item.fired).length
+      : 0;
+    return (
+      <ConfiguredNav
+        name={workspace.experiment.name}
+        status={baseline?.status ?? "none"}
+        firedCount={firedCount}
+      />
+    );
+  }
   // ── Compute current system state ─────────────────────────────
   const cases          = FixtureRepository.getCases();
   const activeVersion  = FixtureRepository.getActiveEvaluatorVersion();
@@ -60,7 +91,7 @@ export async function AppNav() {
 
   return (
     <nav
-      className="bg-jh-panel border-b-2 border-jh-border"
+      className="sticky top-0 z-40 bg-jh-panel border-b-2 border-jh-border"
       aria-label="Judge Health instrument navigation"
     >
       {/* ── DESKTOP header row (hidden on mobile) ── */}
@@ -79,6 +110,9 @@ export async function AppNav() {
           </Link>
           <span className="font-mono text-[9px] text-jh-dim border border-jh-border-lt px-1.5 py-0.5 ml-1">
             JH-001
+          </span>
+          <span className="font-mono text-[9px] border border-jh-border-lt text-jh-dim px-1.5 py-0.5">
+            RUN #0001 · READ ONLY
           </span>
           {/* Mode badge */}
           {isLive ? (
@@ -149,6 +183,63 @@ export async function AppNav() {
             className="font-mono text-[10px] text-jh-dim hover:text-jh-text transition-colors py-2 px-3 inline-block whitespace-nowrap"
             aria-label="Settings"
           >
+            ⚙ CONFIG
+          </Link>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function ConfiguredNav({
+  name,
+  status,
+  firedCount,
+}: {
+  name: string;
+  status: "none" | "running" | "completed" | "partial_failure" | "failed";
+  firedCount: number;
+}) {
+  const badge = status === "completed" && firedCount > 0 ? "INVESTIGATE"
+    : status === "completed" ? "LIVE"
+    : status === "running" ? "RUNNING"
+    : status === "partial_failure" ? "PARTIAL"
+    : status === "failed" ? "FAILED"
+    : "NOT EVALUATED";
+  return (
+    <nav className="sticky top-0 z-40 bg-jh-panel border-b-2 border-jh-border" aria-label="Judge Health instrument navigation">
+      <div className="hidden sm:flex items-center justify-between px-4 py-2 border-b border-jh-border-lt">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/" className="font-sketch text-[1.3rem] font-bold leading-none text-jh-text tracking-wide">
+            JUDGE HEALTH
+          </Link>
+          <span className="font-mono text-[9px] border border-jh-border-lt text-jh-text px-1.5 py-0.5 truncate max-w-[240px]">
+            {name}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] text-jh-border-mid border border-jh-border-lt px-2 py-0.5">
+            {badge}
+          </span>
+          {status === "completed" && firedCount > 0 && (
+            <Link href="/evidence" className="font-mono text-[10px] text-jh-red border border-jh-red/40 px-2 py-0.5">
+              {firedCount} trigger{firedCount > 1 ? "s" : ""} — Investigate →
+            </Link>
+          )}
+        </div>
+      </div>
+      <div className="flex sm:hidden items-center justify-between px-3 py-2 border-b border-jh-border-lt">
+        <Link href="/" className="font-sketch text-[1.15rem] font-bold leading-none text-jh-text">
+          JUDGE HEALTH
+        </Link>
+        <span className="font-mono text-[10px] text-jh-dim truncate max-w-[140px]">{name}</span>
+      </div>
+      <div className="flex items-center gap-0 px-2 sm:px-4 overflow-x-auto">
+        {NAV_LINKS.map(({ href, label }) => (
+          <AppNavActiveLink key={href} href={href} label={label} />
+        ))}
+        <div className="ml-auto shrink-0">
+          <Link href="/settings" className="font-mono text-[10px] text-jh-dim hover:text-jh-text py-2 px-3 inline-block">
             ⚙ CONFIG
           </Link>
         </div>

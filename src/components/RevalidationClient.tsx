@@ -25,6 +25,10 @@ interface Props {
   baselineIsLive?: boolean;
   /** True if candidate metrics come from a completed live candidate run. */
   candidateIsLive?: boolean;
+  /** Archived Run #0001 cannot record a new decision. */
+  readOnly?: boolean;
+  experimentId?: string;
+  resultLabel?: string;
 }
 
 type Decision = "accept" | "reject" | null;
@@ -34,7 +38,11 @@ function pct(v: number) {
 }
 
 // ── Read-only post-decision view ──────────────────────────────
-function DecisionResult({ decision }: { decision: RevalidationDecision }) {
+function DecisionResult({ decision, readOnly = false, resultLabel = "Calibration Run #0001" }: {
+  decision: RevalidationDecision;
+  readOnly?: boolean;
+  resultLabel?: string;
+}) {
   const accepted = decision.decision === "accepted";
   return (
     <InstrumentPanel
@@ -49,7 +57,7 @@ function DecisionResult({ decision }: { decision: RevalidationDecision }) {
               Candidate {accepted ? "accepted" : "rejected"} · {new Date(decision.decidedAt).toLocaleString()}
             </div>
             <div className="font-mono text-[10px] text-jh-dim mt-0.5">
-              Calibration Run #0001
+              {resultLabel}
             </div>
           </div>
         </div>
@@ -94,12 +102,14 @@ function DecisionResult({ decision }: { decision: RevalidationDecision }) {
             <span>
               Candidate rejected. {decision.baselineVersion} remains active.
             </span>
-            <a
-              href="/intervention"
-              className="font-mono text-[11px] border border-jh-red/60 text-jh-red px-3 py-1.5 hover:bg-red-50/30 transition-colors whitespace-nowrap shrink-0"
-            >
-              Create New Intervention →
-            </a>
+            {!readOnly && (
+              <a
+                href="/intervention"
+                className="font-mono text-[11px] border border-jh-red/60 text-jh-red px-3 py-1.5 hover:bg-red-50/30 transition-colors whitespace-nowrap shrink-0"
+              >
+                Create New Intervention →
+              </a>
+            )}
           </div>
         )}
       </div>
@@ -117,15 +127,30 @@ export function RevalidationClient({
   liveRunsComplete,
   baselineIsLive,
   candidateIsLive,
+  readOnly = false,
+  experimentId,
+  resultLabel,
 }: Props) {
   const [decision, setDecision]    = useState<Decision>(null);
   const [note, setNote]            = useState("");
   const [isPending, startTransition] = useTransition();
   const [localDecision, setLocalDecision] = useState<RevalidationDecision | null>(existingDecision);
+  const [error, setError] = useState<string | null>(null);
 
   // Show existing decision if already recorded
   if (localDecision) {
-    return <DecisionResult decision={localDecision} />;
+    return <DecisionResult decision={localDecision} readOnly={readOnly} resultLabel={resultLabel} />;
+  }
+
+  if (readOnly) {
+    return (
+      <InstrumentPanel label="Analyst Decision">
+        <p className="font-mono text-[10px] text-jh-dim py-2">
+          <span className="font-semibold text-jh-text">Read-only. </span>
+          Run #0001 cannot accept, reject, or start another attempt.
+        </p>
+      </InstrumentPanel>
+    );
   }
 
   const canSubmit = decision !== null && note.trim().length >= 10;
@@ -134,24 +159,29 @@ export function RevalidationClient({
     e.preventDefault();
     if (!canSubmit || isPending) return;
 
+    setError(null);
     startTransition(async () => {
-      await actionRecordDecision({
-        candidateId,
-        candidateVersion,
-        baselineVersion,
-        decision: decision === "accept" ? "accepted" : "rejected",
-        rationale: note,
-      });
-      // Optimistically show result
-      setLocalDecision({
-        id: "optimistic",
-        candidateId,
-        candidateVersion,
-        baselineVersion,
-        decision: decision === "accept" ? "accepted" : "rejected",
-        rationale: note,
-        decidedAt: new Date().toISOString(),
-      });
+      try {
+        await actionRecordDecision({
+          candidateId,
+          candidateVersion,
+          baselineVersion,
+          decision: decision === "accept" ? "accepted" : "rejected",
+          rationale: note,
+          experimentId,
+        });
+        setLocalDecision({
+          id: "optimistic",
+          candidateId,
+          candidateVersion,
+          baselineVersion,
+          decision: decision === "accept" ? "accepted" : "rejected",
+          rationale: note,
+          decidedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "The decision could not be recorded.");
+      }
     });
   }
 
@@ -287,6 +317,7 @@ export function RevalidationClient({
               </span>
             )}
           </div>
+          {error && <p className="font-mono text-[10px] text-jh-red">{error}</p>}
         </form>
       </div>
     </InstrumentPanel>

@@ -225,10 +225,14 @@ function StageIndicator({ current }: { current: "observe" | "blind" | "revealed"
 interface CaseDetailProps {
   data: CaseDetailData;
   existingBlindReview?: BlindHumanReview;
+  /** Archived Run #0001 cannot record a new blind review. */
+  readOnly?: boolean;
+  /** Diagnosis is not connected for a named experiment yet. */
+  showDiagnoseLink?: boolean;
 }
 
 // ── Main component ─────────────────────────────────────────────
-export function CaseDetail({ data, existingBlindReview }: CaseDetailProps) {
+export function CaseDetail({ data, existingBlindReview, readOnly = false, showDiagnoseLink = true }: CaseDetailProps) {
   const initialStage = existingBlindReview ? "revealed" : "observe";
   const [stage, setStage]           = useState<"observe" | "blind" | "revealed">(initialStage);
   const [userLabel, setUserLabel]   = useState<Label | null>(null);
@@ -280,13 +284,18 @@ export function CaseDetail({ data, existingBlindReview }: CaseDetailProps) {
         <span className="font-mono text-[10px] text-jh-dim">
           case {data.caseId} · {data.sampleType === "representative" ? "representative sample" : "targeted/risk"}
         </span>
-        {stage === "observe" && (
+        {stage === "observe" && !readOnly && (
           <button
             onClick={() => setStage("blind")}
             className="ml-auto font-mono text-[11px] border border-jh-border px-3 py-1 hover:bg-jh-bg transition-colors"
           >
             Review as Reference →
           </button>
+        )}
+        {stage === "observe" && readOnly && (
+          <span className="ml-auto font-mono text-[10px] text-jh-dim">
+            Read-only · review disabled
+          </span>
         )}
         {stage === "revealed" && displayReview && (
           <span className="ml-auto font-mono text-[10px] text-jh-led-green">
@@ -435,12 +444,14 @@ export function CaseDetail({ data, existingBlindReview }: CaseDetailProps) {
             </span>
             <span className="text-jh-dim ml-2 font-normal">(fixture reference label — not production ground truth)</span>
           </div>
-          <a
-            href="/diagnose"
-            className="ml-auto font-mono text-[11px] border border-jh-border-lt px-3 py-1 hover:border-jh-border hover:bg-jh-bg transition-colors whitespace-nowrap"
-          >
-            Diagnose →
-          </a>
+          {showDiagnoseLink && (
+            <a
+              href="/diagnose"
+              className="ml-auto font-mono text-[11px] border border-jh-border-lt px-3 py-1 hover:border-jh-border hover:bg-jh-bg transition-colors whitespace-nowrap"
+            >
+              Diagnose →
+            </a>
+          )}
         </div>
       )}
     </div>
